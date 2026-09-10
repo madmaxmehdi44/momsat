@@ -7,13 +7,27 @@ export const dynamic = 'force-dynamic';
 
 const RESOLVE_TTL_MS = 60_000;
 
+function looksLikeMediaUrl(url: string) {
+  return /\.(?:m3u8|mp4|webm|m4v)(?:$|[?#])/i.test(url)
+    || /\/(?:playlist|manifest|stream)(?:[\/?#]|$)/i.test(url)
+    || /[?&](?:file|source|src|stream|playlist|manifest)=/i.test(url);
+}
+
 export async function GET(request: NextRequest) {
   const target = request.nextUrl.searchParams.get('url')?.trim() ?? '';
   if (!target) return NextResponse.json({ ok: false, error: 'Missing url' }, { status: 400 });
   if (!(await isSafePublicUrl(target))) return NextResponse.json({ ok: false, error: 'Invalid or blocked URL' }, { status: 400 });
 
   try {
-    const result = await ttlGetOrSet(`momsat:resolve:v2:${target}`, RESOLVE_TTL_MS, () => discoverMediaSources(target));
+    const result = looksLikeMediaUrl(target)
+      ? {
+          requestedUrl: target,
+          sources: [{ url: target, referer: null, origin: (() => { try { return new URL(target).origin; } catch { return null; } })(), discoveredFrom: target, depth: 0 }],
+          visitedPages: [],
+          errors: [],
+        }
+      : await ttlGetOrSet(`momsat:resolve:v2:${target}`, RESOLVE_TTL_MS, () => discoverMediaSources(target));
+
     return NextResponse.json({
       ok: result.sources.length > 0,
       requestedUrl: result.requestedUrl,
