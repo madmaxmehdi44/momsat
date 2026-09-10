@@ -1,12 +1,14 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { NextRequest, NextResponse } from 'next/server';
+import { ttlGetOrSet } from '../../../../../lib/ttl-cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_BYTES = 64 * 1024;
 const TIMEOUT_MS = 7000;
+const PROBE_TTL_MS = 15_000;
 
 function isPrivateIp(value: string) {
   const version = net.isIP(value);
@@ -59,69 +61,84 @@ export async function GET(request: NextRequest) {
   const origin = request.nextUrl.searchParams.get('origin')?.trim() || '';
   if (!target) return NextResponse.json({ ok: false, error: 'Missing url' }, { status: 400 });
 
-  const started = Date.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
+  const cacheKey = `momsat:probe:v2:${target}|${referer}|${origin}`;
   try {
-    const parsed = await assertSafeTarget(target);
-    const headers = new Headers({
-      accept: 'application/vnd.apple.mpegurl, application/x-mpegURL, video/*, audio/*, */*',
-      'user-agent': 'MomSatProbe/1.0',
-      range: `bytes=0-${MAX_BYTES - 1}`,
-    });
-    if (referer) {
-      const ref = await assertSafeTarget(referer);
-      headers.set('referer', ref.toString());
-    }
-    if (origin) {
-      const parsedOrigin = await assertSafeTarget(origin);
-      headers.set('origin', parsedOrigin.origin);
-    }
+    const result = await ttlGetOrSet(cacheKey, PROBE_TTL_MS, async () => {
+      const started = Date.now();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const upstream = await fetch(parsed, { method: 'GET', headers, redirect: 'follow', cache: 'no-store', signal: controller.signal });
-    const contentType = upstream.headers.get('content-type') || '';
-    const finalUrl = upstream.url || parsed.toString();
-    if (!upstream.ok && upstream.status !== 206) {
-      return NextResponse.json({ ok: false, status: upstream.status, contentType, finalUrl, latencyMs: Date.now() - started }, { status: 200 });
-    }
+      try {
+        const parsed = await assertSafeTarget(target);
+        const headers = new Headers({
+          accept: 'application/vnd.apple.mpegurl, application/x-mpegURL, video/*, audio/*, */*',
+          'user-agent': 'MomSatProbe/1.0',
+          range: `bytes=0-${MAX_BYTES - 1}`,
+        });
+        if (referer) {
+          const ref = await assertSafeTarget(referer);
+          headers.set('referer', ref.toString());
+        }
+        if (origin) {
+          const parsedOrigin = await assertSafeTarget(origin);
+          headers.set('origin', parsedOrigin.origin);
+        }
 
-    const reader = upstream.body?.getReader();
-    let bytes = 0;
-    let sample = '';
-    if (reader) {
-      while (bytes < MAX_BYTES) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        bytes += chunk.value.byteLength;
-        if (sample.length < 8192) sample += new TextDecoder().decode(chunk.value, { stream: true });
-        if (bytes >= MAX_BYTES) break;
+        const upstream = await fetch(parsed, { method: 'GET', headers, redirect: 'follow', cache: 'no-store', signal: controller.signal });
+        const contentType = upstream.headers.get('content-type') || '';
+        const finalUrl = upstream.url || parsed.toString();
+        if (!upstream.ok && upstream.status !== 206) {
+          return { ok: false, playable: false, status: upstream.status, contentType, finalUrl, latencyMs: Date.now() - started };
+        }
+
+        const reader = upstream.body?.getReader();
+        let bytes = 0;
+        let sample = '';
+        if (reader) {
+          while (bytes < MAX_BYTES) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            bytes += chunk.value.byteLength;
+            if (sample.length < 8192) sample += new TextDecoder().decode(chunk.value, { stream: true });
+            if (bytes >= MAX_BYTES) break;
+          }
+          await reader.cancel().catch(() => undefined);
+        }
+
+        const kind = classify(contentType, finalUrl, sample);
+        const playlist = kind === 'hls' ? {
+          isMaster: /#EXT-X-STREAM-INF/i.test(sample),
+          hasSegments: /#EXTINF:/i.test(sample),
+        } : null;
+        const playable = kind === 'media' || kind === 'hls' && (playlist?.isMaster || playlist?.hasSegments);
+
+        return {
+          ok: playable,
+          playable,
+          kind,
+          status: upstream.status,
+          contentType,
+          finalUrl,
+          bytesSampled: bytes,
+          latencyMs: Date.now() - started,
+          playlist,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Probe failed';
+        return { ok: false, playable: false, error: message, latencyMs: Date.now() - started };
+      } finally {
+        clearTimeout(timer);
       }
-      await reader.cancel().catch(() => undefined);
-    }
+    });
 
-    const kind = classify(contentType, finalUrl, sample);
-    const playlist = kind === 'hls' ? {
-      isMaster: /#EXT-X-STREAM-INF/i.test(sample),
-      hasSegments: /#EXTINF:/i.test(sample),
-    } : null;
-    const playable = kind === 'media' || kind === 'hls' && (playlist?.isMaster || playlist?.hasSegments);
-
-    return NextResponse.json({
-      ok: playable,
-      playable,
-      kind,
-      status: upstream.status,
-      contentType,
-      finalUrl,
-      bytesSampled: bytes,
-      latencyMs: Date.now() - started,
-      playlist,
-    }, { status: 200, headers: { 'cache-control': 'no-store' } });
+    return NextResponse.json(result, {
+      status: 200,
+      headers: {
+        'cache-control': 'public, s-maxage=15, stale-while-revalidate=30',
+        'access-control-allow-origin': '*',
+      },
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Probe failed';
-    return NextResponse.json({ ok: false, playable: false, error: message, latencyMs: Date.now() - started }, { status: 200 });
-  } finally {
-    clearTimeout(timer);
+    return NextResponse.json({ ok: false, playable: false, error: error instanceof Error ? error.message : 'Probe failed' }, { status: 502 });
   }
 }
