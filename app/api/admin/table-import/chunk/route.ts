@@ -10,6 +10,7 @@ export const runtime = 'nodejs';
 const MAX_CHUNK_BYTES = 2 * 1024 * 1024;
 
 type CsvTable = 'category' | 'channel' | 'source' | 'program';
+type Candidate = [CsvTable, number, string];
 
 function normalizedKeys(row: Record<string, unknown>) {
   return new Set(Object.keys(row).map((key) => key.trim().toLowerCase().replace(/[\s-]+/g, '_')));
@@ -35,7 +36,7 @@ function detectTable(rows: Array<Record<string, string>>): { table: CsvTable; co
     + Number(hasAny(keys, ['category_name', 'categoryname', 'name', 'title']))
     - Number(hasAny(keys, ['url', 'channel_url', 'start', 'start_time']));
 
-  const candidates: Array<[CsvTable, number, string]> = [
+  const candidates: Candidate[] = [
     ['channel', channel, 'channel identity and stream URL fields detected'],
     ['source', source, 'source URL and channel association fields detected'],
     ['program', program, 'program title and time fields detected'],
