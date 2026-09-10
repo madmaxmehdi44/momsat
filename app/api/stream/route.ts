@@ -1,3 +1,5 @@
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -17,7 +19,20 @@ const PRIVATE_HOST_PATTERNS = [
   /^fe80:/i,
 ];
 
-function isAllowedTarget(raw: string) {
+function isPrivateIp(value: string) {
+  const version = net.isIP(value);
+  if (version === 4) {
+    const [a, b] = value.split('.').map(Number);
+    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+  }
+  if (version === 6) {
+    const normalized = value.toLowerCase();
+    return normalized === '::1' || normalized === '::' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:');
+  }
+  return false;
+}
+
+async function isAllowedTarget(raw: string) {
   let parsed: URL;
   try {
     parsed = new URL(raw);
@@ -28,7 +43,27 @@ function isAllowedTarget(raw: string) {
   if (!/^https?:$/i.test(parsed.protocol)) return false;
   const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!hostname || hostname.endsWith('.local') || PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(hostname))) return false;
-  return true;
+  if (net.isIP(hostname)) return !isPrivateIp(hostname);
+
+  try {
+    const records = await dns.lookup(hostname, { all: true });
+    return records.length > 0 && records.every((record) => !isPrivateIp(record.address));
+  } catch {
+    return false;
+  }
+}
+
+async function fetchSafe(initialUrl: string, headers: Headers) {
+  let target = initialUrl;
+  for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
+    if (!(await isAllowedTarget(target))) throw new Error('Blocked stream target');
+    const response = await fetch(target, { headers, cache: 'no-store', redirect: 'manual' });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get('location');
+    if (!location) throw new Error('Redirect without location');
+    target = new URL(location, target).toString();
+  }
+  throw new Error('Too many redirects');
 }
 
 function proxyUrl(target: string, referer: string | null, origin: string | null) {
@@ -44,7 +79,6 @@ function rewritePlaylist(text: string, request: NextRequest, referer: string | n
   const rewrite = (candidate: string) => {
     try {
       const resolved = new URL(candidate, baseUrl).toString();
-      if (!isAllowedTarget(resolved)) return candidate;
       return proxyUrl(resolved, referer, origin);
     } catch {
       return candidate;
@@ -69,7 +103,7 @@ export async function GET(request: NextRequest) {
   const referer = request.nextUrl.searchParams.get('referer')?.trim() || null;
   const origin = request.nextUrl.searchParams.get('origin')?.trim() || null;
 
-  if (!target || !isAllowedTarget(target)) {
+  if (!target || !(await isAllowedTarget(target))) {
     return NextResponse.json({ error: 'Invalid or blocked stream URL.' }, { status: 400 });
   }
 
@@ -78,7 +112,7 @@ export async function GET(request: NextRequest) {
   headers.set('accept', '*/*');
   const range = request.headers.get('range');
   if (range) headers.set('range', range);
-  if (referer && isAllowedTarget(referer)) headers.set('referer', referer);
+  if (referer && await isAllowedTarget(referer)) headers.set('referer', referer);
   if (origin) {
     try {
       const parsedOrigin = new URL(origin);
@@ -89,13 +123,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const upstream = await fetch(target, { headers, cache: 'no-store', redirect: 'follow' });
+    const upstream = await fetchSafe(target, headers);
     if (!upstream.ok && upstream.status !== 206) {
       return NextResponse.json({ error: `Upstream returned ${upstream.status}` }, { status: 502 });
     }
 
     const contentType = upstream.headers.get('content-type') || '';
-    const isPlaylist = /(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl|\.m3u8)/i.test(contentType) || /\.m3u8(?:$|\?)/i.test(target);
+    const isPlaylist = /(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl|\.m3u8)/i.test(contentType) || /\.m3u8(?:$|\?)/i.test(upstream.url || target);
 
     if (isPlaylist) {
       const text = await upstream.text();
