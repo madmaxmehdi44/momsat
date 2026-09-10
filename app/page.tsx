@@ -4,6 +4,11 @@ import Link from 'next/link';
 import { getCatalog, getCategories } from '../lib/catalog-db';
 import SmartPlayer from '../components/SmartPlayer';
 
+function thumbnailSrc(image: string | null, name: string) {
+  if (!image) return null;
+  return `/api/channel-thumbnail?url=${encodeURIComponent(image)}&name=${encodeURIComponent(name)}`;
+}
+
 export default async function Home() {
   const channels = await getCatalog();
   const featured = [...channels].sort((a, b) => b.popular - a.popular).slice(0, 8);
@@ -13,7 +18,7 @@ export default async function Home() {
     <main>
       <header className="top"><div><div className="brand">MOM<span>SAT</span></div><div className="muted">Persian Live TV Discovery</div></div><nav><Link href="/">خانه</Link><Link href="/browse">شبکه‌ها</Link><Link href="/guide">راهنما</Link><Link href="/admin">مدیریت</Link></nav></header>
       <section className="hero"><div><div className="eyebrow">LIVE DISCOVERY</div><h1>تلویزیون فارسی را<br/>مثل یک پلتفرم کشف کن.</h1><p>پخش زنده، دسته‌بندی، جست‌وجوی شبکه، راهنمای برنامه و مسیرهای متعدد پخش در یک کاتالوگ واحد.</p><div className="hero-actions"><Link className="btn primary" href="/browse">مشاهده شبکه‌ها</Link><Link className="btn" href="/guide">راهنمای برنامه‌ها</Link></div></div><div className="hero-card"><div className="player-label">{featured[0] ? `پخش زنده · ${featured[0].name}` : 'پخش زنده'}</div>{featured[0] ? <SmartPlayer channel={featured[0]} /> : <div className="notice">هنوز Channel فعالی در دیتابیس یا کاتالوگ منبع وجود ندارد.</div>}</div></section>
-      <section className="section"><div className="section-head"><div><div className="eyebrow">POPULAR</div><h2>محبوب‌ترین شبکه‌ها</h2></div><Link href="/browse" className="more">همه شبکه‌ها →</Link></div><div className="grid">{featured.map(c=><Link className="card" key={c.id} href={`/channel/${c.id}`}><div className="thumb">{c.image ? <img src={c.image} alt={c.name} loading="lazy" style={{width:'100%',height:'100%',objectFit:'contain',background:'rgba(255,255,255,.04)'}}/> : <div className="fallback">{c.nameEn?.slice(0,3).toUpperCase()||'TV'}</div>}<span className="live">LIVE</span></div><div className="card-body"><div className="title">{c.name}</div><div className="meta">{c.category} · {c.sources.length} منبع</div></div></Link>)}</div></section>
+      <section className="section"><div className="section-head"><div><div className="eyebrow">POPULAR</div><h2>محبوب‌ترین شبکه‌ها</h2></div><Link href="/browse" className="more">همه شبکه‌ها →</Link></div><div className="grid">{featured.map(c => { const image = thumbnailSrc(c.image, c.name); return <Link className="card" key={c.id} href={`/channel/${c.id}`}><div className="thumb">{image ? <img src={image} alt={c.name} loading="lazy" decoding="async" style={{width:'100%',height:'100%',objectFit:'contain',background:'rgba(255,255,255,.04)'}}/> : <div className="fallback">{c.nameEn?.slice(0,3).toUpperCase()||'TV'}</div>}<span className="live">LIVE</span></div><div className="card-body"><div className="title">{c.name}</div><div className="meta">{c.category} · {c.sources.length} منبع</div></div></Link>; })}</div></section>
       <section className="section"><div className="section-head"><div><div className="eyebrow">CATEGORIES</div><h2>دسته‌بندی</h2></div></div><div className="chips">{cats.map(c=><Link key={c.id} href={`/browse?category=${c.id}`}>{c.name}</Link>)}</div></section>
     </main>
   );
