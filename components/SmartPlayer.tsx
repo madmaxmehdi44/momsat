@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import PlayerV2 from './PlayerV2';
+import PlayerV3 from './PlayerV3';
 import styles from './SmartPlayer.module.css';
 
 type Source = {
@@ -56,7 +56,7 @@ async function resolvePages(sources: Source[]) {
 }
 
 export default function SmartPlayer({ channel }: { channel: Channel }) {
-  const candidates = useMemo(() => databaseCandidates(channel), [channel]);
+  const candidates = useMemo(() => databaseCandidates(channel), [channel.url, channel.referer, channel.origin, channel.sources]);
   const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
   const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url)), [candidates]);
   const [resolved, setResolved] = useState<ResolvedSource[]>([]);
@@ -92,7 +92,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
 
   const allSources = useMemo(() => {
     const sources = [...directCandidates, ...resolved];
-    return Array.from(new Map(sources.map((source) => [source.url, source])).values());
+    return Array.from(new Map(sources.map((source) => [source.url.trim(), source])).values());
   }, [directCandidates, resolved]);
 
   const posterImage = channel.image
@@ -100,7 +100,8 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     : null;
 
   if (directCandidates.length > 0) {
-    return <PlayerV2 channel={{ ...channel, image: posterImage, url: directCandidates[0].url, referer: directCandidates[0].referer, origin: directCandidates[0].origin, sources: allSources }} />;
+    const primary = directCandidates[0];
+    return <PlayerV3 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: allSources }} />;
   }
 
   if (resolving) {
@@ -108,7 +109,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
   }
 
   if (resolved.length > 0) {
-    return <PlayerV2 channel={{ ...channel, image: posterImage, url: resolved[0].url, referer: resolved[0].referer, origin: resolved[0].origin, sources: resolved }} />;
+    return <PlayerV3 channel={{ ...channel, image: posterImage, url: resolved[0].url, referer: resolved[0].referer, origin: resolved[0].origin, sources: resolved }} />;
   }
 
   return (
