@@ -1,5 +1,78 @@
 generator client { provider = "prisma-client-js" }
 datasource db { provider = "postgresql" url = env("DATABASE_URL") }
-model Category { id Int @id; name String; nameEn String; channels Channel[] }
-model Channel { id Int @id; name String; nameEn String; image String?; url String; referer String?; origin String?; vpn Boolean @default(false); iran Boolean @default(false); popular BigInt @default(0); vip Boolean @default(false); categoryId Int; categoryName String?; categoryNameEn String?; category Category @relation(fields:[categoryId], references:[id]); sources Source[]; updatedAt DateTime @updatedAt; createdAt DateTime @default(now()); @@index([categoryId]); @@index([name]); }
-model Source { id Int @id; channelId Int; title String?; url String; referer String?; origin String?; country String?; vip Boolean @default(false); channel Channel @relation(fields:[channelId], references:[id], onDelete:Cascade); @@index([channelId]) }
+
+model Category {
+  id Int @id
+  name String
+  nameEn String
+  channels Channel[]
+}
+
+model Channel {
+  id Int @id
+  name String
+  nameEn String
+  image String?
+  url String
+  referer String?
+  origin String?
+  vpn Boolean @default(false)
+  iran Boolean @default(false)
+  popular BigInt @default(0)
+  vip Boolean @default(false)
+  categoryId Int
+  categoryName String?
+  categoryNameEn String?
+  category Category @relation(fields:[categoryId], references:[id])
+  sources Source[]
+  programs Program[]
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  @@index([categoryId])
+  @@index([name])
+}
+
+model Source {
+  id Int @id
+  channelId Int
+  title String?
+  url String
+  referer String?
+  origin String?
+  country String?
+  vip Boolean @default(false)
+  channel Channel @relation(fields:[channelId], references:[id], onDelete:Cascade)
+  @@index([channelId])
+}
+
+model EpgChannel {
+  id String @id
+  displayName String
+  displayNameEn String?
+  icon String?
+  url String?
+  programs Program[]
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  @@index([displayName])
+}
+
+model Program {
+  id String @id
+  channelId Int?
+  epgChannelId String
+  title String
+  subTitle String?
+  description String?
+  category String?
+  icon String?
+  start DateTime
+  end DateTime
+  channel Channel? @relation(fields:[channelId], references:[id], onDelete:SetNull)
+  epgChannel EpgChannel @relation(fields:[epgChannelId], references:[id], onDelete:Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([channelId, start, end])
+  @@index([epgChannelId, start, end])
+  @@index([start, end])
+}
