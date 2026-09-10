@@ -54,7 +54,7 @@ async function probeSources(sources: Source[]) {
       const params = new URLSearchParams({ url: source.url });
       if (source.referer) params.set('referer', source.referer);
       if (source.origin) params.set('origin', source.origin);
-      const response = await fetch(`/api/stream/probe?${params.toString()}`, { cache: 'no-store' });
+      const response = await fetch(`/api/stream/probe?${params.toString()}`);
       const probe = response.ok ? await response.json() as Probe : null;
       return { source, probe, index };
     } catch {
@@ -115,7 +115,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     void Promise.all(queue.map(async (source) => {
       try {
         const params = new URLSearchParams({ url: source.url });
-        const response = await fetch(`/api/stream/resolve?${params.toString()}`, { cache: 'no-store' });
+        const response = await fetch(`/api/stream/resolve?${params.toString()}`);
         if (!response.ok) return [] as ResolvedSource[];
         const body = await response.json() as { sources?: ResolvedSource[] };
         return body.sources ?? [];
