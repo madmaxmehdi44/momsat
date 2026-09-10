@@ -125,28 +125,23 @@ function rewritePlaylist(text: string, baseUrl: string, referer: string | null, 
   return output;
 }
 
-function cacheHeaderFor(contentType: string, finalUrl: string, bodyKind: 'playlist' | 'media') {
-  if (bodyKind === 'playlist' || /mpegurl/i.test(contentType) || /\.m3u8(?:$|[?#])/i.test(finalUrl)) return 'public, s-maxage=3, stale-while-revalidate=5';
-  return 'public, s-maxage=15, stale-while-revalidate=30';
-}
-
 export async function GET(request: NextRequest) {
   const requestedTarget = request.nextUrl.searchParams.get('url')?.trim() ?? '';
   const referer = request.nextUrl.searchParams.get('referer')?.trim() || null;
   const origin = request.nextUrl.searchParams.get('origin')?.trim() || null;
   if (!requestedTarget || !(await isAllowedTarget(requestedTarget))) return NextResponse.json({ error: 'Invalid or blocked stream URL.' }, { status: 400 });
 
-  const headers = new Headers();
-  headers.set('user-agent', request.headers.get('user-agent') || 'MomSatPlayer/1.0');
-  headers.set('accept', '*/*');
-  headers.set('accept-encoding', 'identity');
+  const baseHeaders = new Headers();
+  baseHeaders.set('user-agent', request.headers.get('user-agent') || 'MomSatPlayer/1.0');
+  baseHeaders.set('accept', '*/*');
+  baseHeaders.set('accept-encoding', 'identity');
   const range = request.headers.get('range');
-  if (range) headers.set('range', range);
-  if (referer && await isAllowedTarget(referer)) headers.set('referer', referer);
+  if (range) baseHeaders.set('range', range);
+  if (referer && await isAllowedTarget(referer)) baseHeaders.set('referer', referer);
   if (origin) {
     try {
       const parsedOrigin = new URL(origin);
-      if (/^https?:$/i.test(parsedOrigin.protocol)) headers.set('origin', parsedOrigin.origin);
+      if (/^https?:$/i.test(parsedOrigin.protocol)) baseHeaders.set('origin', parsedOrigin.origin);
     } catch {
       // Ignore malformed Origin values.
     }
@@ -157,14 +152,24 @@ export async function GET(request: NextRequest) {
     let upstream: Response | null = null;
     let upstreamUrl = requestedTarget;
     const failures: string[] = [];
+
     for (const candidate of candidates) {
-      const response = await fetchSafe(candidate, headers);
-      upstream = response;
-      upstreamUrl = response.url || candidate;
-      if (response.ok || response.status === 206) break;
-      failures.push(`${candidate} -> ${response.status}`);
-      if (![403, 404, 410, 429, 500, 502, 503, 504].includes(response.status)) break;
+      for (const stripSiteHeaders of [false, true]) {
+        const headers = new Headers(baseHeaders);
+        if (stripSiteHeaders) {
+          headers.delete('referer');
+          headers.delete('origin');
+        }
+        const response = await fetchSafe(candidate, headers);
+        upstream = response;
+        upstreamUrl = response.url || candidate;
+        if (response.ok || response.status === 206) break;
+        failures.push(`${candidate}${stripSiteHeaders ? ' [no-site-headers]' : ''} -> ${response.status}`);
+        if (![401, 403, 404, 410, 429, 500, 502, 503, 504].includes(response.status)) break;
+      }
+      if (upstream && (upstream.ok || upstream.status === 206)) break;
     }
+
     if (!upstream) throw new Error('No upstream response');
     if (!upstream.ok && upstream.status !== 206) {
       const detail = failures.length ? ` Upstream: ${failures.join(' | ')}` : ` Upstream: ${upstream.status}`;
@@ -174,7 +179,7 @@ export async function GET(request: NextRequest) {
 
     const contentType = upstream.headers.get('content-type') || '';
     const finalUrl = upstreamUrl;
-    const isPlaylistByType = /(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl)/i.test(contentType) || /\.m3u8(?:$|\?)/i.test(finalUrl);
+    const isPlaylistByType = /(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl)/i.test(contentType) || /\.m3u8(?:$|[?#])/i.test(finalUrl);
     if (isPlaylistByType) {
       const text = await upstream.text();
       const isPlaylistByBody = /^\s*#EXTM3U\b/i.test(text);
@@ -182,7 +187,8 @@ export async function GET(request: NextRequest) {
         const body = rewritePlaylist(text, finalUrl, referer, origin);
         return new NextResponse(body, { status: upstream.status, headers: {
           'content-type': 'application/vnd.apple.mpegurl; charset=utf-8',
-          'cache-control': cacheHeaderFor(contentType, finalUrl, 'playlist'),
+          'cache-control': 'no-store, no-cache, must-revalidate',
+          'pragma': 'no-cache',
           'access-control-allow-origin': '*',
           'access-control-allow-headers': '*',
         }});
@@ -194,9 +200,11 @@ export async function GET(request: NextRequest) {
       const value = upstream.headers.get(name);
       if (value) responseHeaders.set(name, value);
     }
-    responseHeaders.set('cache-control', cacheHeaderFor(contentType, finalUrl, 'media'));
+    responseHeaders.set('cache-control', 'no-store, no-cache, must-revalidate');
+    responseHeaders.set('pragma', 'no-cache');
     responseHeaders.set('access-control-allow-origin', '*');
     responseHeaders.set('access-control-allow-headers', '*');
+    responseHeaders.set('access-control-expose-headers', 'Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified');
     return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch (error) {
     console.error('[stream-proxy]', error);
