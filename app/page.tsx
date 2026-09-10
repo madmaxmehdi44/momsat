@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import Link from 'next/link';
 import { getCatalog, getCategories } from '../lib/catalog-db';
 import SmartPlayer from '../components/SmartPlayer';
