@@ -7,10 +7,10 @@ export const runtime = 'nodejs';
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
-  const token = req.headers.get('x-admin-token');
-  if (process.env.ADMIN_TOKEN && token !== process.env.ADMIN_TOKEN) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
-  }
+  const configuredToken = process.env.ADMIN_TOKEN?.trim();
+  const suppliedToken = req.headers.get('x-admin-token')?.trim();
+  if (!configuredToken) return NextResponse.json({ ok: false, error: 'ADMIN_TOKEN is not configured; admin import is disabled.' }, { status: 503 });
+  if (!suppliedToken || suppliedToken !== configuredToken) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
 
   try {
     const form = await req.formData();
@@ -38,6 +38,12 @@ export async function POST(req: NextRequest) {
       updated: detected.result.updated,
       skipped: detected.result.skipped,
       errors: detected.result.errors,
+      ingestion: 'channelsCreated' in detected.result ? {
+        channelsCreated: detected.result.channelsCreated,
+        channelsMatched: detected.result.channelsMatched,
+        sourcesCreated: detected.result.sourcesCreated,
+        sourcesSkipped: detected.result.sourcesSkipped,
+      } : undefined,
       database: { categories, channels, sources, programs },
     }, { status: detected.result.errors.length ? 207 : 200 });
   } catch (error) {
