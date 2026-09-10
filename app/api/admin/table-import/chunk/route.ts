@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { parseCsv } from '../../../../../lib/table-csv-import';
-import { importTable } from '../../../../../lib/table-csv-import';
+import { parseCsv, importTable } from '../../../../../lib/table-csv-import';
 import { importSourceCsvFast } from '../../../../../lib/table-source-import-fast';
 import { prisma } from '../../../../../lib/prisma';
 
@@ -36,12 +35,13 @@ function detectTable(rows: Array<Record<string, string>>): { table: CsvTable; co
     + Number(hasAny(keys, ['category_name', 'categoryname', 'name', 'title']))
     - Number(hasAny(keys, ['url', 'channel_url', 'start', 'start_time']));
 
-  const candidates: Candidate[] = [
-    ['channel', channel, 'channel identity and stream URL fields detected'],
-    ['source', source, 'source URL and channel association fields detected'],
-    ['program', program, 'program title and time fields detected'],
-    ['category', category, 'category identity/name fields detected'],
-  ].sort((a, b) => b[1] - a[1]);
+  const candidates: Candidate[] = [];
+  candidates.push(['channel', channel, 'channel identity and stream URL fields detected']);
+  candidates.push(['source', source, 'source URL and channel association fields detected']);
+  candidates.push(['program', program, 'program title and time fields detected']);
+  candidates.push(['category', category, 'category identity/name fields detected']);
+  candidates.sort((a, b) => Number(b[1]) - Number(a[1]));
+
   const best = candidates[0];
   if (!best || best[1] < 2) throw new Error(`Could not identify the CSV schema. Fields: ${Object.keys(rows[0]).slice(0, 20).join(', ')}`);
 
@@ -80,25 +80,15 @@ export async function POST(req: NextRequest) {
     ]);
 
     return NextResponse.json({
-      ok: result.errors.length === 0,
-      format: 'csv',
+      ok: true,
+      ...result,
       detectedTable: detected.table,
       confidence: detected.confidence,
-      reason: detected.reason,
-      rows: result.rows,
-      created: result.created,
-      updated: result.updated,
-      skipped: result.skipped,
-      errors: result.errors,
-      ingestion: 'channelsCreated' in result ? {
-        channelsCreated: result.channelsCreated,
-        channelsMatched: result.channelsMatched,
-        sourcesCreated: result.sourcesCreated,
-        sourcesSkipped: result.sourcesSkipped,
-      } : undefined,
+      detectionReason: detected.reason,
       database: { categories, channels, sources, programs },
-    }, { status: result.errors.length ? 207 : 200 });
+    }, { status: result.errors?.length ? 207 : 200 });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Chunk import failed' }, { status: 400 });
+    const message = error instanceof Error ? error.message : 'CSV chunk import failed';
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
