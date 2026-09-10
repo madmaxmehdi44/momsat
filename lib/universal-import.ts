@@ -1,8 +1,9 @@
 import type { CsvTable } from './table-csv-import';
 import { importTable, parseCsv } from './table-csv-import';
+import { importM3u } from './m3u-import';
 
 export type UniversalImportDetection = {
-  format: 'csv' | 'json';
+  format: 'csv' | 'json' | 'm3u';
   table: CsvTable;
   confidence: number;
   reason: string;
@@ -90,7 +91,15 @@ export async function detectAndImportUpload(fileName: string, text: string) {
 
   const lower = fileName.toLowerCase();
   if (lower.endsWith('.m3u') || lower.endsWith('.m3u8') || trimmed.startsWith('#EXTM3U')) {
-    throw new Error('M3U playlists are detected correctly, but they should be ingested through a channel/source playlist pipeline rather than the relational CSV importer.');
+    const result = await importM3u(trimmed);
+    return {
+      format: 'm3u' as const,
+      table: 'channel' as const,
+      confidence: 0.99,
+      reason: 'M3U playlist detected from #EXTM3U / file extension; entries imported as channels with linked sources',
+      rows: result.rows,
+      result,
+    };
   }
 
   if (lower.endsWith('.json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
