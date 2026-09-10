@@ -27,6 +27,12 @@ type ResolvedSource = Source & {
   depth?: number;
 };
 
+type ProbeResult = {
+  ok?: boolean;
+  playable?: boolean;
+  latencyMs?: number;
+};
+
 function isDirectMedia(url: string) {
   return /\.(?:m3u8|mp4|webm|m4v)(?:$|[?#])/i.test(url);
 }
@@ -44,7 +50,7 @@ async function resolvePages(sources: Source[]) {
   const groups = await Promise.all(queue.map(async (source) => {
     try {
       const params = new URLSearchParams({ url: source.url });
-      const response = await fetch(`/api/stream/resolve?${params.toString()}`);
+      const response = await fetch(`/api/stream/resolve?${params.toString()}`, { cache: 'no-store' });
       if (!response.ok) return [] as ResolvedSource[];
       const body = await response.json() as { sources?: ResolvedSource[] };
       return body.sources ?? [];
@@ -55,17 +61,55 @@ async function resolvePages(sources: Source[]) {
   return Array.from(new Map(groups.flat().map((source) => [source.url.trim(), source])).values());
 }
 
+async function probeSource(source: Source) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5500);
+  try {
+    const params = new URLSearchParams({ url: source.url });
+    if (source.referer) params.set('referer', source.referer);
+    if (source.origin) params.set('origin', source.origin);
+    const response = await fetch(`/api/stream/probe?${params.toString()}`, { cache: 'no-store', signal: controller.signal });
+    if (!response.ok) return null;
+    const result = await response.json() as ProbeResult;
+    return result.playable || result.ok ? result : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function verifySources(sources: Source[]) {
+  const candidates = sources.slice(0, 10);
+  const results = await Promise.all(candidates.map(async (source, index) => {
+    const probe = await probeSource(source);
+    return probe ? { source, index, latencyMs: probe.latencyMs ?? Number.MAX_SAFE_INTEGER } : null;
+  }));
+
+  return results
+    .filter((item): item is { source: Source; index: number; latencyMs: number } => Boolean(item))
+    .sort((a, b) => {
+      const mediaScore = Number(isDirectMedia(b.source.url)) - Number(isDirectMedia(a.source.url));
+      if (mediaScore !== 0) return mediaScore;
+      return a.latencyMs - b.latencyMs || a.index - b.index;
+    })
+    .map((item) => item.source);
+}
+
 export default function SmartPlayer({ channel }: { channel: Channel }) {
   const candidates = useMemo(() => databaseCandidates(channel), [channel.url, channel.referer, channel.origin, channel.sources]);
   const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
   const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url)), [candidates]);
   const [resolved, setResolved] = useState<ResolvedSource[]>([]);
+  const [verified, setVerified] = useState<Source[]>([]);
   const [resolving, setResolving] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [resolutionError, setResolutionError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setResolved([]);
+    setVerified([]);
     setResolutionError('');
 
     if (!pageCandidates.length) {
@@ -95,21 +139,47 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     return Array.from(new Map(sources.map((source) => [source.url.trim(), source])).values());
   }, [directCandidates, resolved]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!allSources.length) {
+      setVerified([]);
+      setVerifying(false);
+      return () => { cancelled = true; };
+    }
+
+    setVerifying(true);
+    void verifySources(allSources).then((playableSources) => {
+      if (cancelled) return;
+      setVerified(playableSources);
+      setVerifying(false);
+      if (!playableSources.length && !resolving) {
+        setResolutionError('هیچ منبع پخش سالمی پاسخ نداد.');
+      }
+    }).catch(() => {
+      if (cancelled) return;
+      setVerified([]);
+      setVerifying(false);
+      if (!resolving) setResolutionError('بررسی سلامت منابع پخش ناموفق بود.');
+    });
+
+    return () => { cancelled = true; };
+  }, [allSources, resolving]);
+
   const posterImage = channel.image
     ? `/api/channel-thumbnail?url=${encodeURIComponent(channel.image)}&name=${encodeURIComponent(channel.name || 'TV')}`
     : null;
 
-  if (directCandidates.length > 0) {
-    const primary = directCandidates[0];
-    return <PlayerV2 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: allSources }} />;
+  if (verifying && !verified.length) {
+    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال بررسی سلامت مسیرهای پخش…</div></div>;
+  }
+
+  if (verified.length > 0) {
+    const primary = verified[0];
+    return <PlayerV2 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: verified }} />;
   }
 
   if (resolving) {
     return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
-  }
-
-  if (resolved.length > 0) {
-    return <PlayerV2 channel={{ ...channel, image: posterImage, url: resolved[0].url, referer: resolved[0].referer, origin: resolved[0].origin, sources: resolved }} />;
   }
 
   return (
