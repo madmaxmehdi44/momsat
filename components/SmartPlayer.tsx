@@ -54,6 +54,7 @@ function uniqueCandidates(channel: Channel) {
 export default function SmartPlayer({ channel }: { channel: Channel }) {
   const candidates = useMemo(() => uniqueCandidates(channel), [channel]);
   const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
+  const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url) && isEmbeddablePage(source.url)), [candidates]);
   const [selected, setSelected] = useState<Source | null>(null);
   const [probing, setProbing] = useState(directCandidates.length > 0);
 
@@ -99,9 +100,11 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       const remaining = directCandidates.filter((source) => source.url !== selected.url);
       return <PlayerV2 channel={{ ...channel, url: selected.url, referer: selected.referer, origin: selected.origin, sources: [selected, ...remaining] }} />;
     }
+
+    if (!pageCandidates.length) return <PlayerV2 channel={{ ...channel, sources: directCandidates }} />;
   }
 
-  const embed = candidates.find((source) => isEmbeddablePage(source.url));
+  const embed = pageCandidates[0];
   if (!embed) return <PlayerV2 channel={channel} />;
 
   return (
