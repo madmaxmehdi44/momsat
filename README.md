@@ -7,7 +7,7 @@ Next.js 15 + React 19 web app for Persian live-TV discovery, playback, catalog a
 - Live channel catalog with search and category filters.
 - Channel detail pages with normalized metadata and source variants.
 - HLS playback using native browser HLS or hls.js.
-- Admin control center with catalog statistics, catalog sync and EPG sync.
+- Admin control center with catalog statistics, catalog sync, CSV catalog import and EPG sync.
 - PostgreSQL schema through Prisma: `Category`, `Channel`, `Source`, `EpgChannel`, `Program`.
 - Pluggable catalog source adapters with optional failure isolation.
 - XMLTV ingestion with Persian/Arabic name normalization and channel matching.
@@ -22,6 +22,16 @@ npx prisma db push
 npm run seed
 npm run dev
 ```
+
+## CSV catalog import
+
+The admin page (`/admin`) accepts two CSV files: `v2_posts_channels.csv` and `v2_posts_verified.csv`. Uploading both to the **CSV Catalog Import** control sends them to `POST /api/admin/catalog/import` as multipart form data.
+
+The importer is idempotent. It joins verified rows to channel rows by `channel_id`, normalizes Persian/Arabic names (`ي/ى → ی`, `ك → ک`), uses a stable `catalogKey`, matches existing channels before creating records, and checks `(channelId, url)` before inserting a source. Re-importing the same files therefore does not create duplicate channels or stream sources.
+
+The current CSV format supplies channel metadata and the `sourses` source list. The importer also accepts optional future columns such as `language`, `country`, `platform`, `satellite`, `frequency`, `polarization`, `symbolRate`/`symbol_rate`, and `serviceId`/`service_id`/`sid`; these are stored on `Channel` without requiring the CSV to contain them today.
+
+Only server-side admin requests with the existing `ADMIN_TOKEN` protection should be used. CSV uploads are limited to 5 MB per file.
 
 ## Catalog ingestion
 
