@@ -35,6 +35,7 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
   const hlsRef = useRef<HlsLike | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const directWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const epochRef = useRef(0);
   const modeRef = useRef<Mode>('direct');
   const networkRetryRef = useRef(0);
@@ -121,12 +122,14 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
     let cancelled = false;
     let localHls: HlsLike | null = null;
     let activeMode: Mode = 'direct';
+    let startHlsRef: ((target: string) => void) | null = null;
     const source = sources[Math.min(sourceIndex, sources.length - 1)];
     const directUrl = source.url.trim();
     const proxyUrl = proxied(source);
 
     if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+    if (directWatchdogRef.current) clearTimeout(directWatchdogRef.current);
     destroy();
     networkRetryRef.current = 0;
     mediaRecoveryRef.current = 0;
@@ -143,22 +146,22 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
       activeMode = 'proxy';
       modeRef.current = 'proxy';
       setMode('proxy');
+      setLoading(true);
       setError(`${message} تلاش با پراکسی سرور…`);
       networkRetryRef.current = 0;
       mediaRecoveryRef.current = 0;
+      if (directWatchdogRef.current) { clearTimeout(directWatchdogRef.current); directWatchdogRef.current = null; }
       destroy();
       video.pause();
       video.removeAttribute('src');
       video.load();
+      startHlsRef?.(proxyUrl);
       return true;
     };
 
     const failover = (message: string) => {
       if (cancelled || epoch !== epochRef.current) return;
-      if (activeMode === 'direct' && switchToProxy(message)) {
-        fallbackTimerRef.current = setTimeout(() => { if (!cancelled && epoch === epochRef.current) setError(''); }, 450);
-        return;
-      }
+      if (activeMode === 'direct' && switchToProxy(message)) return;
       if (sourceIndex + 1 < sources.length) {
         setError(`${message} مسیر بعدی امتحان می‌شود…`);
         retryTimerRef.current = setTimeout(() => { if (!cancelled && epoch === epochRef.current) chooseSource(sourceIndex + 1); }, 900);
@@ -173,6 +176,7 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
         setLoading(false);
         setPlaying(true);
         setError('');
+        if (directWatchdogRef.current) { clearTimeout(directWatchdogRef.current); directWatchdogRef.current = null; }
       }
     };
     const onPause = () => { if (!cancelled && epoch === epochRef.current) setPlaying(false); };
@@ -219,6 +223,7 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
         }
 
         const startHls = (target: string) => {
+          if (cancelled || epoch !== epochRef.current) return;
           localHls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
@@ -278,7 +283,13 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
           hls.attachMedia(video);
         };
 
+        startHlsRef = startHls;
         startHls(directUrl);
+        directWatchdogRef.current = setTimeout(() => {
+          if (!cancelled && epoch === epochRef.current && activeMode === 'direct' && !playingRef.current) {
+            failover('مسیر مستقیم پاسخی از پلیر دریافت نکرد.');
+          }
+        }, 7000);
       } catch {
         failover('راه‌اندازی مسیر مستقیم ناموفق بود.');
       }
@@ -288,6 +299,7 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
       cancelled = true;
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+      if (directWatchdogRef.current) clearTimeout(directWatchdogRef.current);
       destroy();
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('pause', onPause);
