@@ -240,21 +240,22 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
             nudgeMaxRetry: 4,
             maxBufferHole: 0.8,
           });
-          hlsRef.current = localHls;
-          localHls.on(Hls.Events.MANIFEST_PARSED, () => {
-            if (cancelled || epoch !== epochRef.current || hlsRef.current !== localHls) return;
-            const mapped = localHls.levels.map((level, index) => ({ index, label: level.height ? `${level.height}p` : level.bitrate ? `${Math.round(level.bitrate / 1000)} kbps` : `Level ${index + 1}` }));
+          const hls = localHls;
+          hlsRef.current = hls;
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (cancelled || epoch !== epochRef.current || hlsRef.current !== hls) return;
+            const mapped = hls.levels.map((level, index) => ({ index, label: level.height ? `${level.height}p` : level.bitrate ? `${Math.round(level.bitrate / 1000)} kbps` : `Level ${index + 1}` }));
             setLevels(mapped.filter((x, i, all) => all.findIndex((v) => v.label === x.label) === i));
             setLoading(false);
             applyState();
             void play();
           });
-          localHls.on(Hls.Events.ERROR, (_event, data) => {
-            if (cancelled || epoch !== epochRef.current || hlsRef.current !== localHls || !data?.fatal) return;
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (cancelled || epoch !== epochRef.current || hlsRef.current !== hls || !data?.fatal) return;
             if (activeMode === 'direct') {
               if (data.type === 'mediaError' && mediaRecoveryRef.current < 1) {
                 mediaRecoveryRef.current += 1;
-                localHls?.recoverMediaError();
+                hls.recoverMediaError();
                 return;
               }
               failover(data.type === 'networkError' ? 'دریافت مستقیم استریم مسدود یا ناموفق بود.' : 'مسیر مستقیم HLS خطا داد.');
@@ -262,19 +263,19 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
             }
             if (data.type === 'mediaError' && mediaRecoveryRef.current < 2) {
               mediaRecoveryRef.current += 1;
-              localHls?.recoverMediaError();
+              hls.recoverMediaError();
               return;
             }
             if (data.type === 'networkError' && networkRetryRef.current < 3) {
               networkRetryRef.current += 1;
               setError(`پراکسی: تلاش مجدد ${networkRetryRef.current} از 3…`);
-              localHls?.startLoad(-1);
+              hls.startLoad(-1);
               return;
             }
             failover('پراکسی نتوانست این استریم را پخش کند.');
           });
-          localHls.loadSource(target);
-          localHls.attachMedia(video);
+          hls.loadSource(target);
+          hls.attachMedia(video);
         };
 
         startHls(directUrl);
@@ -324,7 +325,7 @@ export default function PlayerDirectFirst({ channel }: { channel: Channel }) {
       <div className="pro-player-controls">
         <button className="icon-button large" onClick={() => { if (videoRef.current?.paused) void play(); else videoRef.current?.pause(); }} title={playing ? 'توقف' : 'پخش'}>{playing ? <Pause size={21} /> : <Play size={21} />}</button>
         <button className="icon-button" onClick={() => setMuted((v) => !v)} title={muted ? 'فعال کردن صدا' : 'بی‌صدا'}>{muted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
-        <input className="volume-slider" type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} onChange={(e) => { const next = Number(e.target.value); setVolume(next); setMuted(next === 0); }} aria-label="Volume" />
+        <input className="volume-slider" type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} onChange={(e) => { const v = Number(e.target.value); setVolume(v); setMuted(v === 0); }} aria-label="Volume" />
         <div className="pro-player-spacer" />
         {levels.length > 0 && <button className="text-button" onClick={() => setShowQuality((v) => !v)}>HD</button>}
         <button className="text-button live-text">LIVE</button>
