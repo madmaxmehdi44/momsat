@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { syncEpg } from '../../../../../lib/epg';
+import { syncEpg } from '../../../../lib/epg';
 
 export const dynamic = 'force-dynamic';
 
