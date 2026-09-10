@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import PlayerV2 from './PlayerV2';
 import styles from './SmartPlayer.module.css';
+import { getClientStreamFallback } from '../lib/client-stream-fallbacks';
 
 type Source = {
   url: string;
@@ -45,6 +46,7 @@ function uniqueCandidates(channel: Channel) {
   const candidates = [
     ...(channel.url ? [{ url: channel.url, referer: channel.referer, origin: channel.origin }] : []),
     ...(channel.sources ?? []),
+    ...(getClientStreamFallback(channel.name)?.sources ?? []),
   ].filter((source) => /^https?:\/\//i.test(source.url));
   return Array.from(new Map(candidates.map((source) => [source.url.trim(), source])).values());
 }
