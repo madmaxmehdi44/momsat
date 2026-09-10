@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { Channel } from './source';
+import { ensureChannelThumbnail } from './channel-thumbnail';
 
 function stableId(input: string) {
   const digest = crypto.createHash('sha1').update(input).digest();
@@ -84,7 +85,7 @@ export const featuredChannels: Channel[] = definitions.map((definition, index) =
   catId: stableId(`featured:${definition.categoryEn}`),
   name: definition.name,
   nameEn: definition.nameEn,
-  image: null,
+  image: ensureChannelThumbnail(definition.nameEn, null),
   url: definition.sources[0]?.url ?? '',
   referer: definition.sources[0]?.referer ?? null,
   origin: definition.sources[0]?.origin ?? null,
@@ -113,10 +114,13 @@ export function mergeFeaturedChannels(channels: Channel[]) {
 
   const result = channels.map((channel) => {
     const featured = featuredByName.get(channel.nameEn.toLowerCase()) ?? featuredByName.get(channel.name.toLowerCase());
-    if (!featured) return channel;
+    if (!featured) return {
+      ...channel,
+      image: ensureChannelThumbnail(channel.nameEn || channel.name, channel.image),
+    };
     return {
       ...channel,
-      image: channel.image || featured.image,
+      image: ensureChannelThumbnail(channel.nameEn || channel.name, channel.image || featured.image),
       url: featured.url,
       referer: featured.referer,
       origin: featured.origin,
