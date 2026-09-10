@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { mergeFeaturedChannels } from './featured-channels';
 import { fetchCatalog, categoriesOf, Channel } from './source';
+import { ttlGetOrSet } from './ttl-cache';
 
 export type { Channel };
 
@@ -64,10 +65,16 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
   }
 }
 
-export async function getCatalog() {
+const catalogTtlMs = () => Math.max(10_000, Number(process.env.CATALOG_CACHE_TTL_MS || 60_000));
+
+async function loadCatalog(): Promise<Channel[]> {
   const databaseCatalog = await fetchCatalogFromDb();
   if (databaseCatalog && databaseCatalog.length > 0) return databaseCatalog;
   return mergeFeaturedChannels(await fetchCatalog());
+}
+
+export async function getCatalog() {
+  return ttlGetOrSet('momsat:catalog:v2', catalogTtlMs(), loadCatalog);
 }
 
 export function getCategories(channels: Channel[]) {
@@ -82,10 +89,10 @@ export async function findChannel(id: number) {
       const row = await prisma.channel.findUnique({ where: { id }, include: dbInclude });
       if (row) return mergeFeaturedChannels([toCatalog(row)])[0] ?? null;
     } catch (error) {
-      console.warn('[catalog-db] Database unavailable while resolving channel, using source catalog.', error);
+      console.warn('[catalog-db] Database unavailable while resolving channel, using cached catalog.', error);
     }
   }
 
-  const channels = mergeFeaturedChannels(await fetchCatalog());
+  const channels = await getCatalog();
   return channels.find((channel) => channel.id === id) ?? null;
 }
