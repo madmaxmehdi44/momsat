@@ -73,9 +73,7 @@ function proxyUrl(target: string, referer: string | null, origin: string | null)
   return `/api/stream?${params.toString()}`;
 }
 
-function rewritePlaylist(text: string, request: NextRequest, referer: string | null, origin: string | null) {
-  const baseUrl = new URL(request.nextUrl.searchParams.get('url')!);
-
+function rewritePlaylist(text: string, baseUrl: string, referer: string | null, origin: string | null) {
   const rewrite = (candidate: string) => {
     try {
       const resolved = new URL(candidate, baseUrl).toString();
@@ -129,20 +127,24 @@ export async function GET(request: NextRequest) {
     }
 
     const contentType = upstream.headers.get('content-type') || '';
-    const isPlaylist = /(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl|\.m3u8)/i.test(contentType) || /\.m3u8(?:$|\?)/i.test(upstream.url || target);
+    const finalUrl = upstream.url || target;
+    const isPlaylistByType = /(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl)/i.test(contentType) || /\.m3u8(?:$|\?)/i.test(finalUrl);
 
-    if (isPlaylist) {
+    if (isPlaylistByType) {
       const text = await upstream.text();
-      const body = rewritePlaylist(text, request, referer, origin);
-      return new NextResponse(body, {
-        status: upstream.status,
-        headers: {
-          'content-type': 'application/vnd.apple.mpegurl; charset=utf-8',
-          'cache-control': 'no-store, no-cache, must-revalidate',
-          pragma: 'no-cache',
-          'access-control-allow-origin': '*',
-        },
-      });
+      const isPlaylistByBody = /^\s*#EXTM3U\b/i.test(text);
+      if (isPlaylistByBody || isPlaylistByType) {
+        const body = rewritePlaylist(text, finalUrl, referer, origin);
+        return new NextResponse(body, {
+          status: upstream.status,
+          headers: {
+            'content-type': 'application/vnd.apple.mpegurl; charset=utf-8',
+            'cache-control': 'no-store, no-cache, must-revalidate',
+            pragma: 'no-cache',
+            'access-control-allow-origin': '*',
+          },
+        });
+      }
     }
 
     const responseHeaders = new Headers();
