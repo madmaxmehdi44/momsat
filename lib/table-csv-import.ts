@@ -44,8 +44,10 @@ function val(row: Row, ...names: string[]) {
   return key ? row[key] : '';
 }
 function int(v: string, fallback = 0) { const n = Number(v); return Number.isInteger(n) ? n : fallback; }
-function bool(v: string) { return ['1','true','yes','y','on'].includes(norm(v)); }
-function stableInt(key: string) { return Math.abs(Number.parseInt(crypto.createHash('sha1').update(key).digest('hex').slice(0, 7), 16)) || 1; }
+function bool(v: string) { return ['1', 'true', 'yes', 'y', 'on'].includes(norm(v)); }
+function stableInt(key: string) {
+  return Math.abs(Number.parseInt(crypto.createHash('sha1').update(key).digest('hex').slice(0, 7), 16)) || 1;
+}
 function iso(v: string) { const d = new Date(v); return Number.isNaN(d.getTime()) ? null : d; }
 
 function normalizeUrl(value: string) {
@@ -116,6 +118,94 @@ function resolveChannelFromLookup(lookup: ChannelLookup, row: Row) {
   return 0;
 }
 
+async function ensureCategoryId(row: Row) {
+  const explicitId = int(val(row, 'categoryId', 'category_id', 'catId'));
+  if (explicitId > 0) {
+    const existing = await prisma.category.findUnique({ where: { id: explicitId }, select: { id: true } });
+    if (existing) return existing.id;
+  }
+
+  const name = val(row, 'category', 'category_name', 'categoryName');
+  const nameEn = val(row, 'category_name_en', 'categoryNameEn', 'categoryEn') || name;
+  if (!name && !nameEn) throw new Error('category name is required to create missing channel');
+
+  const existing = await prisma.category.findFirst({
+    where: { OR: [{ name: name || undefined }, { nameEn: nameEn || undefined }] },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  const id = explicitId > 0 ? explicitId : stableInt(`category:${norm(nameEn || name)}`);
+  const category = await prisma.category.create({
+    data: { id, name: name || nameEn, nameEn: nameEn || name },
+    select: { id: true },
+  });
+  return category.id;
+}
+
+async function ensureChannelFromSourceRow(row: Row, lookup: ChannelLookup) {
+  const hints = channelHints(row);
+  const resolved = resolveChannelFromLookup(lookup, row);
+  if (resolved) return resolved;
+
+  const name = hints.name || hints.nameEn;
+  const nameEn = hints.nameEn || hints.name || name;
+  if (!name) return 0;
+
+  const existing = await prisma.channel.findFirst({
+    where: { OR: [{ name }, { nameEn }, { catalogKey: `csv:${norm(nameEn)}` }] },
+    select: { id: true, name: true, nameEn: true, url: true },
+  });
+  if (existing) {
+    lookup.byId.set(existing.id, existing.id);
+    lookup.byName.set(norm(existing.name), existing.id);
+    lookup.byName.set(norm(existing.nameEn), existing.id);
+    lookup.byUrl.set(normalizeUrl(existing.url), existing.id);
+    return existing.id;
+  }
+
+  const categoryId = await ensureCategoryId(row);
+  const preferredId = hints.id;
+  const id = await uniqueChannelId(preferredId, `channel:${norm(nameEn)}`);
+  const url = val(row, 'channelUrl', 'channel_url', 'channelURL', 'channel_link') || val(row, 'channel_url', 'url', 'source_url');
+  if (!url) throw new Error('channel URL is required to create missing channel');
+
+  const created = await prisma.channel.create({
+    data: {
+      id,
+      name,
+      nameEn,
+      catalogKey: `csv:${norm(nameEn)}`,
+      image: val(row, 'image', 'channel_image', 'logo') || null,
+      url,
+      referer: val(row, 'referer', 'channel_referer') || null,
+      origin: val(row, 'origin', 'channel_origin') || null,
+      vpn: bool(val(row, 'vpn', 'need_vpn')),
+      iran: bool(val(row, 'iran', 'for_iran')),
+      popular: BigInt(int(val(row, 'popular'))),
+      vip: bool(val(row, 'vip', 'isvip')),
+      language: val(row, 'language') || null,
+      country: val(row, 'country') || null,
+      platform: val(row, 'platform') || null,
+      satellite: val(row, 'satellite') || null,
+      frequency: val(row, 'frequency') || null,
+      polarization: val(row, 'polarization') || null,
+      symbolRate: val(row, 'symbolRate', 'symbol_rate') || null,
+      serviceId: val(row, 'serviceId', 'service_id') || null,
+      categoryId,
+      categoryName: val(row, 'category_name', 'categoryName', 'category') || null,
+      categoryNameEn: val(row, 'category_name_en', 'categoryNameEn') || null,
+    },
+    select: { id: true, name: true, nameEn: true, url: true },
+  });
+
+  lookup.byId.set(created.id, created.id);
+  lookup.byName.set(norm(created.name), created.id);
+  lookup.byName.set(norm(created.nameEn), created.id);
+  lookup.byUrl.set(normalizeUrl(created.url), created.id);
+  return created.id;
+}
+
 export async function importTable(table: CsvTable, text: string) {
   const rows = parseCsv(text);
   let created = 0, updated = 0, skipped = 0;
@@ -171,24 +261,11 @@ export async function importTable(table: CsvTable, text: string) {
       if (table === 'source') {
         const url = val(r, 'url', 'channel_url', 'source_url');
         if (!url) throw new Error('url/channel_url is required');
-        let channelId = channelLookup ? resolveChannelFromLookup(channelLookup, r) : 0;
-        if (!channelId) {
-          const hints = channelHints(r);
-          const directId = hints.id;
-          if (directId > 0) channelId = (await prisma.channel.findUnique({ where: { id: directId }, select: { id: true } }))?.id ?? 0;
-          if (!channelId) {
-            const candidates = [hints.nameEn, hints.name].map(norm).filter(Boolean);
-            if (candidates.length) {
-              const channels = await prisma.channel.findMany({ select: { id: true, name: true, nameEn: true } });
-              const match = channels.find(ch => candidates.includes(norm(ch.nameEn)) || candidates.includes(norm(ch.name)));
-              channelId = match?.id ?? 0;
-            }
-          }
-        }
+        const channelId = channelLookup ? await ensureChannelFromSourceRow(r, channelLookup) : 0;
         if (!channelId) throw new Error('valid channelId/channel name is required');
         const duplicate = await prisma.source.findFirst({ where: { channelId, url }, select: { id: true } });
         if (duplicate) { skipped++; continue; }
-        const preferred = int(val(r, 'id', 'source_id'));
+        const preferred = int(val(r, 'id', 'source_id', 'ID'));
         let id = preferred > 0 && !(await prisma.source.findUnique({ where: { id: preferred }, select: { id: true } }))
           ? preferred : stableInt(`source:${channelId}:${url}`);
         while (await prisma.source.findUnique({ where: { id }, select: { id: true } })) id++;
