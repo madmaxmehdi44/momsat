@@ -3,53 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Maximize, Minimize, Pause, PictureInPicture2, Play, RotateCcw, Settings, Volume2, VolumeX } from 'lucide-react';
 
-type Source = {
-  id?: number | null;
-  url: string;
-  title?: string | null;
-  referer?: string | null;
-  origin?: string | null;
-  country?: string | null;
-  vip?: boolean;
-};
+type Source = { id?: number | null; url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
+type Channel = { name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
+type HlsInstance = { destroy: () => void; loadSource: (url: string) => void; attachMedia: (media: HTMLVideoElement) => void; startLoad: (startPosition?: number) => void; recoverMediaError: () => void; currentLevel: number; levels: Array<{ height?: number; bitrate?: number }>; on: (event: string, fn: (event: unknown, data: any) => void) => void };
+type HlsCtor = { new (config?: Record<string, unknown>): HlsInstance; isSupported: () => boolean; Events: Record<string, string> };
 
-type Channel = {
-  name?: string;
-  image?: string | null;
-  url?: string | null;
-  referer?: string | null;
-  origin?: string | null;
-  sources?: Source[];
-};
-
-type HlsInstance = {
-  destroy: () => void;
-  loadSource: (url: string) => void;
-  attachMedia: (media: HTMLVideoElement) => void;
-  startLoad: (startPosition?: number) => void;
-  recoverMediaError: () => void;
-  currentLevel: number;
-  levels: Array<{ height?: number; bitrate?: number }>;
-  on: (event: string, fn: (event: unknown, data: any) => void) => void;
-};
-
-type HlsCtor = {
-  new (config?: Record<string, unknown>): HlsInstance;
-  isSupported: () => boolean;
-  Events: Record<string, string>;
-};
-
-function usable(url: string) {
-  return /^https?:\/\//i.test(url.trim());
-}
-
+function usable(url: string) { return /^https?:\/\//i.test(url.trim()); }
 function proxied(source: Source) {
   const qs = new URLSearchParams({ url: source.url });
   if (source.referer) qs.set('referer', source.referer);
   if (source.origin) qs.set('origin', source.origin);
   return `/api/stream?${qs.toString()}`;
 }
-
 function score(source: Source, index: number) {
   const u = source.url.toLowerCase();
   let value = 0;
@@ -68,6 +33,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const networkRetryRef = useRef(0);
   const mediaRecoveryRef = useRef(false);
+  const playingRef = useRef(false);
   const volumeRef = useRef(0.85);
   const mutedRef = useRef(true);
   const [sourceIndex, setSourceIndex] = useState(0);
@@ -83,33 +49,21 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const [fullscreen, setFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
 
-  useEffect(() => {
-    volumeRef.current = volume;
-  }, [volume]);
-
-  useEffect(() => {
-    mutedRef.current = muted;
-  }, [muted]);
+  useEffect(() => { playingRef.current = playing; }, [playing]);
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   const sources = useMemo(() => {
     const raw: Source[] = [];
-    if (channel.url && usable(channel.url)) {
-      raw.push({ url: channel.url, title: 'Primary', referer: channel.referer, origin: channel.origin });
-    }
+    if (channel.url && usable(channel.url)) raw.push({ url: channel.url, title: 'Primary', referer: channel.referer, origin: channel.origin });
     raw.push(...(channel.sources ?? []).filter((source) => usable(source.url)));
     const unique = Array.from(new Map(raw.map((source) => [source.url.trim(), source])).values());
     return unique.sort((a, b) => score(b, unique.indexOf(b)) - score(a, unique.indexOf(a)));
   }, [channel]);
 
   const clearTimers = useCallback(() => {
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
-    }
-    if (hideControlsTimerRef.current) {
-      clearTimeout(hideControlsTimerRef.current);
-      hideControlsTimerRef.current = null;
-    }
+    if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+    if (hideControlsTimerRef.current) { clearTimeout(hideControlsTimerRef.current); hideControlsTimerRef.current = null; }
   }, []);
 
   const destroy = useCallback(() => {
@@ -120,12 +74,10 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const revealControls = useCallback((autoHide = true) => {
     setControlsVisible(true);
     if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
-    if (autoHide && playing) {
-      hideControlsTimerRef.current = setTimeout(() => {
-        setControlsVisible(false);
-      }, 3200);
+    if (autoHide && playingRef.current) {
+      hideControlsTimerRef.current = setTimeout(() => setControlsVisible(false), 3200);
     }
-  }, [playing]);
+  }, []);
 
   const selectSource = useCallback((index: number) => {
     if (!sources.length) return;
@@ -178,19 +130,13 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
 
     const source = sources[sourceIndex] ?? sources[0];
     const url = proxied(source);
-
-    const applyState = () => {
-      video.volume = volumeRef.current;
-      video.muted = mutedRef.current;
-    };
+    const applyState = () => { video.volume = volumeRef.current; video.muted = mutedRef.current; };
 
     const failover = (message: string) => {
       if (cancelled) return;
       if (sourceIndex + 1 < sources.length) {
         setError(`${message} مسیر بعدی امتحان می‌شود…`);
-        retryTimerRef.current = setTimeout(() => {
-          if (!cancelled) selectSource(sourceIndex + 1);
-        }, 800);
+        retryTimerRef.current = setTimeout(() => { if (!cancelled) selectSource(sourceIndex + 1); }, 800);
       } else {
         setLoading(false);
         setError(`${message} هیچ مسیر دیگری برای پخش باقی نمانده است.`);
@@ -199,34 +145,19 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     };
 
     const onPlaying = () => {
-      if (!cancelled) {
-        setLoading(false);
-        setPlaying(true);
-        revealControls(true);
-      }
+      if (!cancelled) { setLoading(false); setPlaying(true); revealControls(true); }
     };
-
     const onPause = () => {
-      if (!cancelled) {
-        setPlaying(false);
-        setControlsVisible(true);
-      }
+      if (!cancelled) { setPlaying(false); setControlsVisible(true); }
     };
-
-    const onWaiting = () => {
-      if (!cancelled) setLoading(true);
-    };
-
+    const onWaiting = () => { if (!cancelled) setLoading(true); };
     const onLoaded = () => {
       if (cancelled) return;
       applyState();
       setLoading(false);
       void play();
     };
-
-    const onError = () => {
-      if (!cancelled) failover('منبع فعلی قابل پخش نیست.');
-    };
+    const onError = () => { if (!cancelled) failover('منبع فعلی قابل پخش نیست.'); };
 
     video.addEventListener('playing', onPlaying);
     video.addEventListener('pause', onPause);
@@ -274,10 +205,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
         localHls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (cancelled || !localHls) return;
           const nextLevels = localHls.levels
-            .map((level, index) => ({
-              index,
-              label: level.height ? `${level.height}p` : level.bitrate ? `${Math.round(level.bitrate / 1000)} kbps` : `Level ${index + 1}`,
-            }))
+            .map((level, index) => ({ index, label: level.height ? `${level.height}p` : level.bitrate ? `${Math.round(level.bitrate / 1000)} kbps` : `Level ${index + 1}` }))
             .filter((level, index, all) => all.findIndex((item) => item.label === level.label) === index);
           setLevels(nextLevels);
           applyState();
@@ -287,20 +215,17 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
 
         localHls.on(Hls.Events.ERROR, (_event, data) => {
           if (cancelled || !data?.fatal) return;
-
           if (data.type === 'mediaError' && !mediaRecoveryRef.current) {
             mediaRecoveryRef.current = true;
             localHls?.recoverMediaError();
             return;
           }
-
           if (data.type === 'networkError' && networkRetryRef.current < 2) {
             networkRetryRef.current += 1;
             setError(`اتصال به منبع ناپایدار است. تلاش ${networkRetryRef.current} از 2…`);
             localHls?.startLoad(-1);
             return;
           }
-
           failover(data.type === 'networkError' ? 'خطای شبکه در منبع فعلی.' : 'خطای HLS در منبع فعلی.');
         });
 
@@ -323,14 +248,11 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
       video.removeEventListener('canplay', onLoaded);
       video.removeEventListener('error', onError);
     };
-  }, [channel, clearTimers, destroy, play, revealControls, selectSource, sourceIndex, sources]);
+  }, [channel, clearTimers, destroy, play, selectSource, sourceIndex, sources]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (video) {
-      video.volume = volume;
-      video.muted = muted;
-    }
+    if (video) { video.volume = volume; video.muted = muted; }
   }, [volume, muted]);
 
   useEffect(() => {
@@ -357,16 +279,10 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const togglePip = useCallback(async () => {
     const video = videoRef.current as HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> };
     if (!video.requestPictureInPicture) return;
-    try {
-      await video.requestPictureInPicture();
-    } catch {
-      // Browser may reject PiP while playback is unavailable.
-    }
+    try { await video.requestPictureInPicture(); } catch { /* Browser may reject PiP. */ }
   }, []);
 
-  const resetToCurrentSource = useCallback(() => {
-    selectSource(sourceIndex);
-  }, [selectSource, sourceIndex]);
+  const resetToCurrentSource = useCallback(() => selectSource(sourceIndex), [selectSource, sourceIndex]);
 
   return (
     <div
@@ -377,10 +293,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
       onMouseEnter={() => revealControls(false)}
       onTouchStart={() => revealControls(true)}
       onKeyDown={(event) => {
-        if (event.key === ' ') {
-          event.preventDefault();
-          togglePlay();
-        }
+        if (event.key === ' ') { event.preventDefault(); togglePlay(); }
         if (event.key.toLowerCase() === 'f') void toggleFullscreen();
         if (event.key.toLowerCase() === 'm') setMuted((value) => !value);
       }}
@@ -395,117 +308,28 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
         onClick={togglePlay}
         onDoubleClick={() => void toggleFullscreen()}
       />
-
-      {loading && !error && (
-        <div className="pro-player-loader">
-          <span className="spinner" />
-          <span>در حال اتصال به پخش زنده…</span>
-        </div>
-      )}
-
-      {error && (
-        <div className="pro-player-error">
-          <div>
-            <div className="pro-player-error-title">پخش متوقف شد</div>
-            <div className="muted">{error}</div>
-            <button className="pro-player-retry" onClick={resetToCurrentSource}>
-              <RotateCcw size={15} />
-              تلاش مجدد
-            </button>
-          </div>
-        </div>
-      )}
+      {loading && !error && <div className="pro-player-loader"><span className="spinner" /><span>در حال اتصال به پخش زنده…</span></div>}
+      {error && <div className="pro-player-error"><div><div className="pro-player-error-title">پخش متوقف شد</div><div className="muted">{error}</div><button className="pro-player-retry" onClick={resetToCurrentSource}><RotateCcw size={15} /> تلاش مجدد</button></div></div>}
 
       <div className="pro-player-top">
         <div className="pro-player-live"><span /> LIVE</div>
         <div className="pro-player-channel">{channel.name || 'MOMSAT'}</div>
-        {sources.length > 1 && (
-          <button className="icon-button" onClick={() => setShowSources((value) => !value)} title="مسیرهای پخش">
-            <Settings size={18} />
-          </button>
-        )}
+        {sources.length > 1 && <button className="icon-button" onClick={() => setShowSources((value) => !value)} title="مسیرهای پخش"><Settings size={18} /></button>}
       </div>
 
-      {showSources && sources.length > 1 && (
-        <div className="pro-player-menu source-menu">
-          <div className="menu-title">مسیر پخش</div>
-          {sources.map((source, index) => (
-            <button
-              key={`${source.url}-${index}`}
-              className={index === sourceIndex ? 'selected' : ''}
-              onClick={() => {
-                selectSource(index);
-                setShowSources(false);
-              }}
-            >
-              <span>{source.title || `Source ${index + 1}`}</span>
-              {source.country && <small>{source.country}</small>}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {showQuality && levels.length > 0 && (
-        <div className="pro-player-menu quality-menu">
-          <button
-            className={quality === -1 ? 'selected' : ''}
-            onClick={() => {
-              if (hlsRef.current) hlsRef.current.currentLevel = -1;
-              setQuality(-1);
-              setShowQuality(false);
-            }}
-          >
-            Auto
-          </button>
-          {levels.map((level) => (
-            <button
-              key={level.index}
-              className={quality === level.index ? 'selected' : ''}
-              onClick={() => {
-                if (hlsRef.current) hlsRef.current.currentLevel = level.index;
-                setQuality(level.index);
-                setShowQuality(false);
-              }}
-            >
-              {level.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {showSources && sources.length > 1 && <div className="pro-player-menu source-menu"><div className="menu-title">مسیر پخش</div>{sources.map((source, index) => <button key={`${source.url}-${index}`} className={index === sourceIndex ? 'selected' : ''} onClick={() => { selectSource(index); setShowSources(false); }}><span>{source.title || `Source ${index + 1}`}</span>{source.country && <small>{source.country}</small>}</button>)}</div>}
+      {showQuality && levels.length > 0 && <div className="pro-player-menu quality-menu"><button className={quality === -1 ? 'selected' : ''} onClick={() => { if (hlsRef.current) hlsRef.current.currentLevel = -1; setQuality(-1); setShowQuality(false); }}>Auto</button>{levels.map((level) => <button key={level.index} className={quality === level.index ? 'selected' : ''} onClick={() => { if (hlsRef.current) hlsRef.current.currentLevel = level.index; setQuality(level.index); setShowQuality(false); }}>{level.label}</button>)}</div>}
 
       <div className="pro-player-controls">
-        <button className="icon-button large" onClick={togglePlay} title={playing ? 'توقف' : 'پخش'}>
-          {playing ? <Pause size={21} /> : <Play size={21} />}
-        </button>
-        <button className="icon-button" onClick={() => setMuted((value) => !value)} title={muted ? 'فعال کردن صدا' : 'بی‌صدا'}>
-          {muted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}
-        </button>
-        <input
-          className="volume-slider"
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={muted ? 0 : volume}
-          aria-label="Volume"
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            setVolume(next);
-            setMuted(next === 0);
-          }}
-        />
+        <button className="icon-button large" onClick={togglePlay} title={playing ? 'توقف' : 'پخش'}>{playing ? <Pause size={21} /> : <Play size={21} />}</button>
+        <button className="icon-button" onClick={() => setMuted((value) => !value)} title={muted ? 'فعال کردن صدا' : 'بی‌صدا'}>{muted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
+        <input className="volume-slider" type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} aria-label="Volume" onChange={(event) => { const next = Number(event.target.value); setVolume(next); setMuted(next === 0); }} />
         <div className="pro-player-spacer" />
         <span className="pro-player-source-status">{sourceIndex + 1}/{Math.max(sources.length, 1)}</span>
-        {levels.length > 0 && (
-          <button className="text-button" onClick={() => setShowQuality((value) => !value)}>HD</button>
-        )}
+        {levels.length > 0 && <button className="text-button" onClick={() => setShowQuality((value) => !value)}>HD</button>}
         <button className="text-button live-text">LIVE</button>
-        <button className="icon-button" onClick={() => void togglePip()} title="Picture in picture">
-          <PictureInPicture2 size={18} />
-        </button>
-        <button className="icon-button" onClick={() => void toggleFullscreen()} title={fullscreen ? 'خروج از تمام صفحه' : 'تمام صفحه'}>
-          {fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
-        </button>
+        <button className="icon-button" onClick={() => void togglePip()} title="Picture in picture"><PictureInPicture2 size={18} /></button>
+        <button className="icon-button" onClick={() => void toggleFullscreen()} title={fullscreen ? 'خروج از تمام صفحه' : 'تمام صفحه'}>{fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}</button>
       </div>
     </div>
   );
