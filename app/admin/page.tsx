@@ -217,7 +217,25 @@ export default function Admin() {
 
       const form = new FormData();
       form.append('file', item.file);
-      const response = await xhrUpload('/api/admin/table-import', form, token, progress => patchUpload(item.id, { uploadProgress: progress, elapsedMs: Date.now() - startedAt, etaMs: etaFromProgress(startedAt, progress) }));
+      const response = await xhrUpload('/api/admin/table-import', form, token, progress => {
+        if (progress >= 100) {
+          patchUpload(item.id, {
+            phase: 'processing',
+            uploadProgress: 100,
+            elapsedMs: Date.now() - startedAt,
+            etaMs: null,
+            message: 'آپلود فایل کامل شد؛ سرور در حال ثبت رکوردها در دیتابیس است…',
+          });
+          setMsg('آپلود کامل شد؛ در حال ثبت رکوردها در دیتابیس…');
+          return;
+        }
+        patchUpload(item.id, {
+          phase: 'uploading',
+          uploadProgress: progress,
+          elapsedMs: Date.now() - startedAt,
+          etaMs: etaFromProgress(startedAt, progress),
+        });
+      });
       patchUpload(item.id, { phase: 'processing', uploadProgress: 100, elapsedMs: Date.now() - startedAt, etaMs: null, message: 'فایل به سرور رسید؛ در حال پردازش و ثبت در دیتابیس…' });
       setMsg('فایل به سرور رسید؛ در حال ثبت رکوردها در دیتابیس…');
 
@@ -259,23 +277,21 @@ export default function Admin() {
     <section style={{ marginTop: 20 }}><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}><span className="eyebrow">ADMIN TOKEN</span><input className="status" style={{ minWidth: 280 }} type="password" value={token} onChange={e => saveToken(e.target.value)} placeholder="ADMIN_TOKEN" /></div></section>
     <section style={{ marginTop: 24 }}><div className="eyebrow">IMPORT HISTORY</div><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}><h2 style={{ margin: '6px 0' }}>پردازش زنده فایل</h2><span className="status">{msg}</span></div>
       {uploads.length === 0 ? <div className="notice" style={{ marginTop: 12, textAlign: 'center', padding: 30 }}><strong>هنوز فایلی پردازش نشده است</strong></div> : <div style={{ display: 'grid', gap: 14, marginTop: 12 }}>{uploads.map(u => {
-        const overall = u.phase === 'reading' ? Math.round(u.readProgress * 0.25) : u.phase === 'analyzing' ? 25 + Math.round(u.analysisProgress * 0.25) : u.phase === 'uploading' ? 50 + Math.round(u.uploadProgress * 0.35) : u.phase === 'processing' ? 95 : u.phase === 'done' ? 100 : 0;
-        const currentProgress = u.phase === 'reading' ? u.readProgress : u.phase === 'analyzing' ? u.analysisProgress : u.phase === 'uploading' ? u.uploadProgress : u.phase === 'processing' ? 100 : u.phase === 'done' ? 100 : 0;
+        const overall = u.phase === 'reading' ? Math.round(u.readProgress * 0.25) : u.phase === 'analyzing' ? 25 + Math.round(u.analysisProgress * 0.25) : u.phase === 'uploading' ? 50 + Math.round(u.uploadProgress * 0.35) : u.phase === 'processing' ? 85 : u.phase === 'done' ? 100 : 0;
+        const currentProgress = u.phase === 'reading' ? u.readProgress : u.phase === 'analyzing' ? u.analysisProgress : u.phase === 'uploading' ? u.uploadProgress : null;
         const phaseLabel = u.phase === 'reading' ? 'خواندن فایل' : u.phase === 'analyzing' ? 'تحلیل رکوردها' : u.phase === 'uploading' ? 'آپلود به سرور' : u.phase === 'processing' ? 'ثبت در دیتابیس' : u.phase === 'done' ? 'تکمیل شد' : 'خطا';
         return <div key={u.id} className="notice" style={{ padding: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}><div><strong>{u.file.name}</strong><span className="muted" style={{ marginInlineStart: 8 }}>{(u.file.size / 1024).toFixed(1)} KB</span></div><span className="status">{phaseLabel} · {overall}%</span></div>
           <div style={{ height: 10, borderRadius: 999, background: 'rgba(255,255,255,.08)', overflow: 'hidden', marginTop: 12 }}><div style={{ width: `${overall}%`, height: '100%', transition: 'width .2s ease', background: 'var(--accent, #3b82f6)' }} /></div>
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10, fontSize: 13 }}><span>مرحله: {currentProgress}%</span><span>رکوردها: {u.totalRows.toLocaleString()}</span><span>زمان: {(u.elapsedMs / 1000).toFixed(1)}s</span><span>زمان باقی‌مانده: {u.phase === 'processing' ? 'در حال ثبت…' : formatEta(u.etaMs)}</span></div>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10, fontSize: 13 }}><span>مرحله: {currentProgress == null ? 'در حال ثبت…' : `${currentProgress}%`}</span><span>رکوردها: {u.totalRows.toLocaleString()}</span><span>زمان: {(u.elapsedMs / 1000).toFixed(1)}s</span><span>زمان باقی‌مانده: {u.phase === 'processing' ? 'در حال ثبت…' : formatEta(u.etaMs)}</span></div>
           {u.preview.length > 0 && <div style={{ marginTop: 14 }}><div className="eyebrow">RECORD PREVIEW / FIRST {u.preview.length}</div><div style={{ overflowX: 'auto', marginTop: 8, maxHeight: 420, overflowY: 'auto' }}><table className="admin-table"><thead><tr><th>#</th><th>Type</th><th>Name</th><th>Name EN</th><th>URL</th><th>Group</th><th>Country</th><th>Satellite</th><th>Frequency</th></tr></thead><tbody>{u.preview.map(row => <tr key={`${u.id}-${row.row}`}><td>{row.row}</td><td>{row.type}</td><td>{row.name || '—'}</td><td>{row.nameEn || '—'}</td><td style={{ maxWidth: 420, wordBreak: 'break-all' }}>{row.url || row.extra || '—'}</td><td>{row.group || row.category || '—'}</td><td>{row.country || '—'}</td><td>{row.satellite || '—'}</td><td>{row.frequency || '—'}</td></tr>)}</tbody></table></div></div>}
-          {u.result?.ingestion && <div style={{ marginTop: 12 }}><div className="eyebrow">DATABASE RESULT</div><div className="muted" style={{ marginTop: 6 }}>Channels: +{u.result.ingestion.channelsCreated || 0} created · {u.result.ingestion.channelsMatched || 0} matched · Sources: +{u.result.ingestion.sourcesCreated || 0} created · {u.result.ingestion.sourcesSkipped || 0} duplicate</div></div>}
-          {u.result?.database && <div className="muted" style={{ marginTop: 6 }}>DB totals after import: {u.result.database.channels || 0} channels · {u.result.database.sources || 0} sources · {u.result.database.categories || 0} categories · {u.result.database.programs || 0} programs</div>}
-          {u.message && <div className="muted" style={{ marginTop: 8 }}>{u.message}</div>}
-          {u.result?.errors?.length ? <div style={{ marginTop: 7 }}>خطا: {u.result.errors[0]}</div> : null}
-          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}><button className="btn" disabled={u.status === 'sending'} onClick={() => removeUpload(u.id)}>حذف</button></div>
+          {u.message && <div className="status" style={{ marginTop: 12 }}>{u.message}</div>}
+          {u.result && <div className="notice" style={{ marginTop: 12, padding: 14 }}><div className="eyebrow">DATABASE RESULT</div><div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 8 }}><span>Format: {u.result.format || '—'}</span><span>Table: {labels[u.result.detectedTable || ''] || u.result.detectedTable || '—'}</span><span>Confidence: {u.result.confidence != null ? `${Math.round(u.result.confidence * 100)}%` : '—'}</span><span>Rows: {u.result.rows ?? 0}</span><span>Created: {u.result.created ?? 0}</span><span>Updated: {u.result.updated ?? 0}</span><span>Skipped: {u.result.skipped ?? 0}</span><span>Errors: {u.result.errors?.length ?? 0}</span></div>{u.result.database && <div className="muted" style={{ marginTop: 8 }}>DB totals — Categories: {u.result.database.categories ?? 0} · Channels: {u.result.database.channels ?? 0} · Sources: {u.result.database.sources ?? 0} · Programs: {u.result.database.programs ?? 0}</div>}{u.result.ingestion && <div className="muted" style={{ marginTop: 6 }}>Ingestion — Created channels: {u.result.ingestion.channelsCreated ?? 0} · Matched: {u.result.ingestion.channelsMatched ?? 0} · Sources created: {u.result.ingestion.sourcesCreated ?? 0} · Source duplicates: {u.result.ingestion.sourcesSkipped ?? 0}</div>}{u.result.errors?.length ? <pre style={{ whiteSpace: 'pre-wrap', marginTop: 10, fontSize: 12 }}>{u.result.errors.slice(0, 20).join('\n')}</pre> : null}</div>}
+          <button className="btn" style={{ marginTop: 12 }} onClick={() => removeUpload(u.id)}>حذف از تاریخچه</button>
         </div>;
       })}</div>}
     </section>
-    <div className="admin-tools" style={{ marginTop: 24 }}><input className="status" style={{ minWidth: 250 }} value={q} onChange={e => setQ(e.target.value)} placeholder="جستجو…" /><select className="status" value={cat} onChange={e => setCat(e.target.value)}><option value="">همه دسته‌ها</option>{cats.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select><button className="btn primary" onClick={sync}>Fetch + Sync</button><button className="btn" onClick={syncEpg}>Sync EPG</button><span className="status">{msg}</span></div>
-    <div style={{ overflowX: 'auto', marginTop: 16 }}><table className="admin-table"><thead><tr><th>ID</th><th>نام</th><th>دسته</th><th>Platform</th><th>Satellite</th><th>Sources</th><th></th></tr></thead><tbody>{filtered.map(c => <tr key={c.id}><td>{c.id}</td><td>{c.name}<div className="muted">{c.nameEn}</div></td><td>{c.category}</td><td>{c.platform || '—'}</td><td>{c.satellite || '—'}</td><td>{c.sources.length}</td><td><Link href={`/channel/${c.id}`} className="more">View</Link></td></tr>)}</tbody></table></div>
+    <section style={{ marginTop: 24, display: 'flex', gap: 10, flexWrap: 'wrap' }}><button className="btn" onClick={sync}>Sync منابع</button><button className="btn" onClick={syncEpg}>Sync EPG</button></section>
+    <section style={{ marginTop: 28 }}><div className="eyebrow">CHANNEL CATALOG</div><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}><input className="status" placeholder="جستجو…" value={q} onChange={e => setQ(e.target.value)} /><select className="status" value={cat} onChange={e => setCat(e.target.value)}><option value="">همهٔ دسته‌ها</option>{cats.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}</select></div><div style={{ overflowX: 'auto', marginTop: 12 }}><table className="admin-table"><thead><tr><th>Channel</th><th>Category</th><th>VPN</th><th>Iran</th><th>Platform</th><th>Satellite</th><th>Frequency</th><th>Sources</th></tr></thead><tbody>{filtered.map(c => <tr key={c.id}><td>{c.name}<br /><span className="muted">{c.nameEn}</span></td><td>{c.category}</td><td>{c.vpn ? 'YES' : 'NO'}</td><td>{c.iran ? 'YES' : 'NO'}</td><td>{c.platform || '—'}</td><td>{c.satellite || '—'}</td><td>{c.frequency || '—'}</td><td>{c.sources.length}</td></tr>)}</tbody></table></div></section>
   </main>;
 }
