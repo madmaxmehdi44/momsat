@@ -1,0 +1,36 @@
+{
+  "source": {
+    "apk": "My Satellite and TV 3.0.7",
+    "package": "ir.alphasoft.mytv"
+  },
+  "backend": {
+    "base_url": "https://appfa.beauty/",
+    "api_base": "https://appfa.beauty/newwebservice/api/",
+    "api_v2_base": "https://appfa.beauty/newwebservice/api/v2/"
+  },
+  "discovered_endpoints": [
+    "/newwebservice/api/v2/login",
+    "/newwebservice/api/v2/logout",
+    "/newwebservice/api/v2/register"
+  ],
+  "address_sources": [
+    "https://raw.githubusercontent.com/mytvsat/webservice/refs/heads/main/getaddress",
+    "https://raw.githubusercontent.com/mytvsat/webservice/refs/heads/main/v2/getaddress"
+  ],
+  "address_resolution": {
+    "status": "ok",
+    "url": "https://appfa.beauty/",
+    "payment_url": "https://payfa.beauty/"
+  },
+  "channel_model_fields": [
+    "channel_url",
+    "channel_referer",
+    "channel_origin"
+  ],
+  "source_repo": "https://github.com/mytvsat/webservice",
+  "notes": [
+    "The APK contains a CryptoManager using AES/CBC/PKCS5Padding and GZIP handling for backend payloads.",
+    "The complete v2/posts channel payload has not been published here because the extraction has not yet been fully verified.",
+    "Do not treat discovered stream URLs as authorized redistribution sources without rights verification."
+  ]
+}
