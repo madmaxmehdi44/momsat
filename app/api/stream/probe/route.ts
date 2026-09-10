@@ -1,7 +1,7 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { NextRequest, NextResponse } from 'next/server';
-import { ttlGetOrSet } from '../../../../../lib/ttl-cache';
+import { ttlGetOrSet } from '../../../../lib/ttl-cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
