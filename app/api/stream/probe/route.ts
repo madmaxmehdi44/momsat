@@ -46,7 +46,8 @@ async function assertSafeTarget(raw: string) {
 
 function classify(contentType: string, target: string, body: string) {
   const normalizedType = contentType.toLowerCase();
-  if (/mpegurl|x-mpegurl|mpegurl|m3u8/i.test(normalizedType) || /\.m3u8(?:$|\?)/i.test(target) || body.startsWith('#EXTM3U')) return 'hls';
+  const trimmed = body.trimStart();
+  if (/mpegurl|x-mpegurl|application\/vnd\.apple\.mpegurl/i.test(normalizedType) || /\.m3u8(?:$|\?)/i.test(target) && /^#EXTM3U\b/i.test(trimmed)) return 'hls';
   if (/video\/(mp4|webm)|audio\/mpeg/i.test(normalizedType)) return 'media';
   if (/text\/html|application\/xhtml\+xml/i.test(normalizedType)) return 'html';
   return 'unknown';
@@ -54,6 +55,8 @@ function classify(contentType: string, target: string, body: string) {
 
 export async function GET(request: NextRequest) {
   const target = request.nextUrl.searchParams.get('url')?.trim() ?? '';
+  const referer = request.nextUrl.searchParams.get('referer')?.trim() || '';
+  const origin = request.nextUrl.searchParams.get('origin')?.trim() || '';
   if (!target) return NextResponse.json({ ok: false, error: 'Missing url' }, { status: 400 });
 
   const started = Date.now();
@@ -67,6 +70,14 @@ export async function GET(request: NextRequest) {
       'user-agent': 'MomSatProbe/1.0',
       range: `bytes=0-${MAX_BYTES - 1}`,
     });
+    if (referer) {
+      const ref = await assertSafeTarget(referer);
+      headers.set('referer', ref.toString());
+    }
+    if (origin) {
+      const parsedOrigin = await assertSafeTarget(origin);
+      headers.set('origin', parsedOrigin.origin);
+    }
 
     const upstream = await fetch(parsed, { method: 'GET', headers, redirect: 'follow', cache: 'no-store', signal: controller.signal });
     const contentType = upstream.headers.get('content-type') || '';
@@ -89,15 +100,16 @@ export async function GET(request: NextRequest) {
       await reader.cancel().catch(() => undefined);
     }
 
-    const kind = classify(contentType, finalUrl, sample.trimStart());
+    const kind = classify(contentType, finalUrl, sample);
     const playlist = kind === 'hls' ? {
       isMaster: /#EXT-X-STREAM-INF/i.test(sample),
       hasSegments: /#EXTINF:/i.test(sample),
     } : null;
+    const playable = kind === 'media' || kind === 'hls' && (playlist?.isMaster || playlist?.hasSegments);
 
     return NextResponse.json({
-      ok: kind === 'hls' || kind === 'media',
-      playable: kind === 'hls' || kind === 'media',
+      ok: playable,
+      playable,
       kind,
       status: upstream.status,
       contentType,
