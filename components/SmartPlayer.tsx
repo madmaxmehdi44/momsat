@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import PlayerV2 from './PlayerV2';
 import styles from './SmartPlayer.module.css';
 
@@ -8,6 +9,8 @@ type Source = {
   title?: string | null;
   referer?: string | null;
   origin?: string | null;
+  country?: string | null;
+  vip?: boolean;
 };
 
 type Channel = {
@@ -17,6 +20,12 @@ type Channel = {
   referer?: string | null;
   origin?: string | null;
   sources?: Source[];
+};
+
+type Probe = {
+  playable?: boolean;
+  kind?: 'hls' | 'media' | 'html' | 'unknown';
+  latencyMs?: number;
 };
 
 function isDirectMedia(url: string) {
@@ -32,15 +41,62 @@ function isEmbeddablePage(url: string) {
   }
 }
 
-export default function SmartPlayer({ channel }: { channel: Channel }) {
+function uniqueCandidates(channel: Channel) {
   const candidates = [
     ...(channel.url ? [{ url: channel.url, referer: channel.referer, origin: channel.origin }] : []),
     ...(channel.sources ?? []),
   ].filter((source) => /^https?:\/\//i.test(source.url));
+  return Array.from(new Map(candidates.map((source) => [source.url.trim(), source])).values());
+}
 
-  const direct = candidates.find((source) => isDirectMedia(source.url));
-  if (direct) {
-    return <PlayerV2 channel={{ ...channel, url: direct.url, referer: direct.referer, origin: direct.origin, sources: candidates }} />;
+export default function SmartPlayer({ channel }: { channel: Channel }) {
+  const candidates = useMemo(() => uniqueCandidates(channel), [channel]);
+  const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
+  const [selected, setSelected] = useState<Source | null>(null);
+  const [probing, setProbing] = useState(directCandidates.length > 0);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!directCandidates.length) {
+      setSelected(null);
+      setProbing(false);
+      return () => { cancelled = true; };
+    }
+
+    setProbing(true);
+    setSelected(null);
+
+    void Promise.all(
+      directCandidates.map(async (source, index) => {
+        try {
+          const response = await fetch(`/api/stream/probe?url=${encodeURIComponent(source.url)}`, { cache: 'no-store' });
+          const probe = response.ok ? (await response.json() as Probe) : null;
+          return { source, probe, index };
+        } catch {
+          return { source, probe: null, index };
+        }
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const playable = results
+        .filter((item) => item.probe?.playable)
+        .sort((a, b) => (a.probe?.latencyMs ?? Number.MAX_SAFE_INTEGER) - (b.probe?.latencyMs ?? Number.MAX_SAFE_INTEGER) || a.index - b.index);
+      setSelected(playable[0]?.source ?? null);
+      setProbing(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [directCandidates]);
+
+  if (directCandidates.length > 0) {
+    if (probing) {
+      return <div className={styles.embedPlayer}><div className={styles.probing}>در حال بررسی مسیرهای پخش زنده…</div></div>;
+    }
+
+    if (selected) {
+      const remaining = candidates.filter((source) => source.url !== selected.url);
+      return <PlayerV2 channel={{ ...channel, url: selected.url, referer: selected.referer, origin: selected.origin, sources: [selected, ...remaining] }} />;
+    }
   }
 
   const embed = candidates.find((source) => isEmbeddablePage(source.url));
