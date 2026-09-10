@@ -28,8 +28,7 @@ type ResolvedSource = Source & {
 };
 
 function isDirectMedia(url: string) {
-  return /\.(?:m3u8|mp4|webm|m4v)(?:$|[?#])/i.test(url)
-    || /(?:\/|[?&])(m3u8|playlist|manifest|stream)(?:[/?=&]|$)/i.test(url);
+  return /\.(?:m3u8|mp4|webm|m4v)(?:$|[?#])/i.test(url);
 }
 
 function databaseCandidates(channel: Channel) {
@@ -96,8 +95,12 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     return Array.from(new Map(sources.map((source) => [source.url, source])).values());
   }, [directCandidates, resolved]);
 
+  const posterImage = channel.image
+    ? `/api/channel-thumbnail?url=${encodeURIComponent(channel.image)}&name=${encodeURIComponent(channel.name || 'TV')}`
+    : null;
+
   if (directCandidates.length > 0) {
-    return <PlayerV2 channel={{ ...channel, url: directCandidates[0].url, referer: directCandidates[0].referer, origin: directCandidates[0].origin, sources: allSources }} />;
+    return <PlayerV2 channel={{ ...channel, image: posterImage, url: directCandidates[0].url, referer: directCandidates[0].referer, origin: directCandidates[0].origin, sources: allSources }} />;
   }
 
   if (resolving) {
@@ -105,7 +108,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
   }
 
   if (resolved.length > 0) {
-    return <PlayerV2 channel={{ ...channel, url: resolved[0].url, referer: resolved[0].referer, origin: resolved[0].origin, sources: resolved }} />;
+    return <PlayerV2 channel={{ ...channel, image: posterImage, url: resolved[0].url, referer: resolved[0].referer, origin: resolved[0].origin, sources: resolved }} />;
   }
 
   return (
