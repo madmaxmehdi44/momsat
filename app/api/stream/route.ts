@@ -96,6 +96,13 @@ function rewritePlaylist(text: string, baseUrl: string, referer: string | null, 
   return output;
 }
 
+function cacheHeaderFor(contentType: string, finalUrl: string, bodyKind: 'playlist' | 'media') {
+  if (bodyKind === 'playlist' || /mpegurl/i.test(contentType) || /\.m3u8(?:$|[?#])/i.test(finalUrl)) {
+    return 'public, s-maxage=3, stale-while-revalidate=5';
+  }
+  return 'public, s-maxage=15, stale-while-revalidate=30';
+}
+
 export async function GET(request: NextRequest) {
   const target = request.nextUrl.searchParams.get('url')?.trim() ?? '';
   const referer = request.nextUrl.searchParams.get('referer')?.trim() || null;
@@ -139,9 +146,9 @@ export async function GET(request: NextRequest) {
           status: upstream.status,
           headers: {
             'content-type': 'application/vnd.apple.mpegurl; charset=utf-8',
-            'cache-control': 'no-store, no-cache, must-revalidate',
-            pragma: 'no-cache',
+            'cache-control': cacheHeaderFor(contentType, finalUrl, 'playlist'),
             'access-control-allow-origin': '*',
+            'access-control-allow-headers': '*',
           },
         });
       }
@@ -152,7 +159,7 @@ export async function GET(request: NextRequest) {
       const value = upstream.headers.get(name);
       if (value) responseHeaders.set(name, value);
     }
-    responseHeaders.set('cache-control', 'no-store');
+    responseHeaders.set('cache-control', cacheHeaderFor(contentType, finalUrl, 'media'));
     responseHeaders.set('access-control-allow-origin', '*');
     responseHeaders.set('access-control-allow-headers', '*');
 
