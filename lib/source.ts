@@ -29,6 +29,17 @@ export type RawPost = {
   category_name?: string;
   category_name_en?: string;
   channel_headers?: unknown;
+  language?: string;
+  country?: string;
+  platform?: string;
+  satellite?: string;
+  frequency?: string;
+  polarization?: string;
+  symbolRate?: string;
+  symbol_rate?: string;
+  serviceId?: string;
+  service_id?: string;
+  sid?: string;
   sourses?: RawSource[];
 };
 
@@ -45,6 +56,14 @@ export type Channel = {
   iran: boolean;
   popular: number;
   vip: boolean;
+  language: string | null;
+  country: string | null;
+  platform: string | null;
+  satellite: string | null;
+  frequency: string | null;
+  polarization: string | null;
+  symbolRate: string | null;
+  serviceId: string | null;
   category: string;
   categoryEn: string;
   sources: {
@@ -166,33 +185,17 @@ function siteChannel(name: string, pageUrl: string, streamUrls: string[], image:
     vip: false,
   }));
   return {
-    id: stableId(`${adapterId}:channel:${pageUrl}`),
-    catId: stableId(`${adapterId}:category:${categoryEn}`),
-    name,
-    nameEn: name,
-    image,
-    url: stream,
-    referer: pageUrl,
-    origin: new URL(pageUrl).origin,
-    vpn: false,
-    iran: true,
-    popular: 0,
-    vip: false,
-    category,
-    categoryEn,
-    sources,
+    id: stableId(`${adapterId}:channel:${pageUrl}`), catId: stableId(`${adapterId}:category:${categoryEn}`), name, nameEn: name,
+    image, url: stream, referer: pageUrl, origin: new URL(pageUrl).origin, vpn: false, iran: true, popular: 0, vip: false,
+    language: 'fa', country: null, platform: 'INTERNET', satellite: null, frequency: null, polarization: null, symbolRate: null, serviceId: null,
+    category, categoryEn, sources,
   };
 }
 
 async function discoverSite(indexUrl: string, adapterId: string, pathPattern: RegExp) {
   const indexHtml = await fetchText(indexUrl);
   const anchors = extractAnchors(indexHtml, indexUrl);
-  const candidates = Array.from(new Map(
-    anchors
-      .filter((link) => pathPattern.test(link.href) && link.href !== indexUrl)
-      .map((link) => [link.href, link]),
-  ).values()).slice(0, envInt('SOURCE_SITE_MAX_CHANNELS', 250, 1, 1000));
-
+  const candidates = Array.from(new Map(anchors.filter((link) => pathPattern.test(link.href) && link.href !== indexUrl).map((link) => [link.href, link])).values()).slice(0, envInt('SOURCE_SITE_MAX_CHANNELS', 250, 1, 1000));
   const results: Channel[] = [];
   const concurrency = envInt('SOURCE_SITE_CONCURRENCY', 6, 1, 20);
   for (let i = 0; i < candidates.length; i += concurrency) {
@@ -203,9 +206,7 @@ async function discoverSite(indexUrl: string, adapterId: string, pathPattern: Re
         const streams = mediaUrls(html, candidate.href);
         if (!streams.length) return null;
         return siteChannel(candidate.text, candidate.href, streams, htmlImage(html, candidate.href), adapterId);
-      } catch {
-        return null;
-      }
+      } catch { return null; }
     }));
     results.push(...discovered.filter((item): item is Channel => Boolean(item)));
   }
@@ -228,29 +229,14 @@ function decryptPayload(text: string) {
 function normalizePosts(body: { posts?: RawPost[] } | RawPost[]) {
   const posts = Array.isArray(body) ? body : body.posts ?? [];
   return posts.map((post): Channel => ({
-    id: post.channel_id,
-    catId: post.category_id,
-    name: post.channel_name,
-    nameEn: post.channel_name_en,
-    image: post.channel_image ?? null,
-    url: post.channel_url,
-    referer: post.channel_referer ?? null,
-    origin: post.channel_origin ?? null,
-    vpn: Boolean(post.need_vpn),
-    iran: Boolean(post.for_iran),
-    popular: Number(post.popular ?? 0),
-    vip: Boolean(post.isvip),
-    category: post.category_name ?? '',
-    categoryEn: post.category_name_en ?? '',
-    sources: (post.sourses ?? []).map((source) => ({
-      id: source.ID ?? null,
-      title: source.title ?? null,
-      url: source.channel_url,
-      referer: source.channel_referer ?? null,
-      origin: source.channel_origin ?? null,
-      country: source.country ?? null,
-      vip: Boolean(source.isvip),
-    })),
+    id: post.channel_id, catId: post.category_id, name: post.channel_name, nameEn: post.channel_name_en,
+    image: post.channel_image ?? null, url: post.channel_url, referer: post.channel_referer ?? null, origin: post.channel_origin ?? null,
+    vpn: Boolean(post.need_vpn), iran: Boolean(post.for_iran), popular: Number(post.popular ?? 0), vip: Boolean(post.isvip),
+    language: post.language ?? 'fa', country: post.country ?? null, platform: post.platform ?? 'INTERNET', satellite: post.satellite ?? null,
+    frequency: post.frequency ?? null, polarization: post.polarization ?? null, symbolRate: post.symbolRate ?? post.symbol_rate ?? null,
+    serviceId: post.serviceId ?? post.service_id ?? post.sid ?? null,
+    category: post.category_name ?? '', categoryEn: post.category_name_en ?? '',
+    sources: (post.sourses ?? []).map((source) => ({ id: source.ID ?? null, title: source.title ?? null, url: source.channel_url, referer: source.channel_referer ?? null, origin: source.channel_origin ?? null, country: source.country ?? null, vip: Boolean(source.isvip) })),
   }));
 }
 
@@ -265,23 +251,13 @@ function parseM3u(text: string, adapterId: string) {
     const name = info.split(',').slice(1).join(',').trim() || 'Unknown Channel';
     const group = info.match(/group-title=["']([^"']*)["']/i)?.[1] || 'Imported TV';
     const logo = info.match(/tvg-logo=["']([^"']*)["']/i)?.[1] || null;
-    channels.push({
-      id: stableId(`${adapterId}:${url}`),
-      catId: stableId(`${adapterId}:group:${group}`),
-      name,
-      nameEn: name,
-      image: logo,
-      url,
-      referer: null,
-      origin: null,
-      vpn: false,
-      iran: true,
-      popular: 0,
-      vip: false,
-      category: group,
-      categoryEn: group,
-      sources: [{ id: stableId(`${adapterId}:source:${url}`), title: 'M3U', url, referer: null, origin: null, country: null, vip: false }],
-    });
+    const satellite = info.match(/(?:satellite|sat)=["']([^"']*)["']/i)?.[1] ?? null;
+    const frequency = info.match(/(?:frequency|freq)=["']([^"']*)["']/i)?.[1] ?? null;
+    const polarization = info.match(/(?:polarization|pol)=["']([^"']*)["']/i)?.[1] ?? null;
+    channels.push({ id: stableId(`${adapterId}:${url}`), catId: stableId(`${adapterId}:group:${group}`), name, nameEn: name, image: logo, url,
+      referer: null, origin: null, vpn: false, iran: true, popular: 0, vip: false, language: 'fa', country: null, platform: satellite ? 'SATELLITE' : 'INTERNET',
+      satellite, frequency, polarization, symbolRate: null, serviceId: null, category: group, categoryEn: group,
+      sources: [{ id: stableId(`${adapterId}:source:${url}`), title: 'M3U', url, referer: null, origin: null, country: null, vip: false }] });
     i++;
   }
   return channels;
@@ -291,90 +267,44 @@ const myTvSatAdapter: CatalogSourceAdapter = {
   id: 'mytvsat-encrypted', name: 'mytvsat encrypted feed', optional: true,
   isEnabled: () => envFlag('SOURCE_ENCRYPTED_ENABLED', false),
   isConfigured: () => Boolean(process.env.SOURCE_ENCRYPTED_URL?.trim() && process.env.SOURCE_AES_KEY_HEX?.trim() && process.env.SOURCE_AES_IV_HEX?.trim()),
-  async fetch() {
-    const url = process.env.SOURCE_ENCRYPTED_URL?.trim();
-    if (!url) throw new Error('SOURCE_ENCRYPTED_URL is missing');
-    const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`source returned ${response.status}`);
-    return normalizePosts(decryptPayload(await response.text()));
-  },
+  async fetch() { const url = process.env.SOURCE_ENCRYPTED_URL?.trim(); if (!url) throw new Error('SOURCE_ENCRYPTED_URL is missing'); const response = await fetch(url, { cache: 'no-store' }); if (!response.ok) throw new Error(`source returned ${response.status}`); return normalizePosts(decryptPayload(await response.text())); },
 };
 
 const parsaTvAdapter: CatalogSourceAdapter = {
   id: 'parsatv-public', name: 'ParsaTV public directory', optional: true,
-  isEnabled: () => envFlag('SOURCE_PARSATV_ENABLED', true),
-  isConfigured: () => Boolean(process.env.SOURCE_PARSATV_INDEX_URL?.trim()),
-  async fetch() {
-    return discoverSite(process.env.SOURCE_PARSATV_INDEX_URL!.trim(), 'parsatv', /parsatv\.com\/name=/i);
-  },
+  isEnabled: () => envFlag('SOURCE_PARSATV_ENABLED', true), isConfigured: () => Boolean(process.env.SOURCE_PARSATV_INDEX_URL?.trim()),
+  async fetch() { return discoverSite(process.env.SOURCE_PARSATV_INDEX_URL!.trim(), 'parsatv', /parsatv\.com\/name=/i); },
 };
-
 const persianTvLiveAdapter: CatalogSourceAdapter = {
   id: 'persiantvlive-public', name: 'PersianTVLive public directory', optional: true,
-  isEnabled: () => envFlag('SOURCE_PERSIANTVLIVE_ENABLED', true),
-  isConfigured: () => Boolean(process.env.SOURCE_PERSIANTVLIVE_INDEX_URL?.trim()),
-  async fetch() {
-    return discoverSite(process.env.SOURCE_PERSIANTVLIVE_INDEX_URL!.trim(), 'persiantvlive', /persiantvlive\.com\//i);
-  },
+  isEnabled: () => envFlag('SOURCE_PERSIANTVLIVE_ENABLED', true), isConfigured: () => Boolean(process.env.SOURCE_PERSIANTVLIVE_INDEX_URL?.trim()),
+  async fetch() { return discoverSite(process.env.SOURCE_PERSIANTVLIVE_INDEX_URL!.trim(), 'persiantvlive', /persiantvlive\.com\//i); },
 };
-
 const pakhshZendeAdapter: CatalogSourceAdapter = {
   id: 'pakhshzende-public', name: 'PakhshZende public directory', optional: true,
-  isEnabled: () => envFlag('SOURCE_PAKHSHZENDE_ENABLED', true),
-  isConfigured: () => Boolean(process.env.SOURCE_PAKHSHZENDE_INDEX_URL?.trim()),
-  async fetch() {
-    return discoverSite(process.env.SOURCE_PAKHSHZENDE_INDEX_URL!.trim(), 'pakhshzende', /pakhshzende\.com\/tv-channel\//i);
-  },
+  isEnabled: () => envFlag('SOURCE_PAKHSHZENDE_ENABLED', true), isConfigured: () => Boolean(process.env.SOURCE_PAKHSHZENDE_INDEX_URL?.trim()),
+  async fetch() { return discoverSite(process.env.SOURCE_PAKHSHZENDE_INDEX_URL!.trim(), 'pakhshzende', /pakhshzende\.com\/tv-channel\//i); },
 };
-
 const m3uAdapter: CatalogSourceAdapter = {
   id: 'm3u-import', name: 'M3U playlist importer', optional: true,
-  isEnabled: () => envFlag('SOURCE_M3U_ENABLED', true),
-  isConfigured: () => Boolean(process.env.SOURCE_M3U_URLS?.trim()),
-  async fetch() {
-    const urls = unique((process.env.SOURCE_M3U_URLS ?? '').split(/[\n,]/).map((v) => v.trim()));
-    const payloads = await Promise.all(urls.map((url) => fetchText(url)));
-    return payloads.flatMap((text) => parseM3u(text, 'm3u-import'));
-  },
+  isEnabled: () => envFlag('SOURCE_M3U_ENABLED', true), isConfigured: () => Boolean(process.env.SOURCE_M3U_URLS?.trim()),
+  async fetch() { const urls = unique((process.env.SOURCE_M3U_URLS ?? '').split(/[\n,]/).map((v) => v.trim())); const payloads = await Promise.all(urls.map((url) => fetchText(url))); return payloads.flatMap((text) => parseM3u(text, 'm3u-import')); },
 };
-
 const officialAdapter: CatalogSourceAdapter = {
   id: 'official-feed', name: 'official broadcaster feed', optional: true,
-  isEnabled: () => envFlag('SOURCE_OFFICIAL_ENABLED', true),
-  isConfigured: () => Boolean(process.env.SOURCE_OFFICIAL_URLS?.trim()),
-  async fetch() {
-    const urls = unique((process.env.SOURCE_OFFICIAL_URLS ?? '').split(/[\n,]/).map((v) => v.trim()));
-    const payloads = await Promise.all(urls.map((url) => fetchText(url)));
-    return payloads.flatMap((text) => {
-      try {
-        const json = JSON.parse(text) as unknown;
-        if (Array.isArray(json)) return normalizePosts(json as RawPost[]);
-        if (json && typeof json === 'object' && 'posts' in json) return normalizePosts(json as { posts?: RawPost[] });
-      } catch { /* fall through to M3U */ }
-      return parseM3u(text, 'official-feed');
-    });
-  },
+  isEnabled: () => envFlag('SOURCE_OFFICIAL_ENABLED', true), isConfigured: () => Boolean(process.env.SOURCE_OFFICIAL_URLS?.trim()),
+  async fetch() { const urls = unique((process.env.SOURCE_OFFICIAL_URLS ?? '').split(/[\n,]/).map((v) => v.trim())); const payloads = await Promise.all(urls.map((url) => fetchText(url))); return payloads.flatMap((text) => { try { const json = JSON.parse(text) as unknown; if (Array.isArray(json)) return normalizePosts(json as RawPost[]); if (json && typeof json === 'object' && 'posts' in json) return normalizePosts(json as { posts?: RawPost[] }); } catch {} return parseM3u(text, 'official-feed'); }); },
 };
 
-export const catalogSourceAdapters: CatalogSourceAdapter[] = [
-  myTvSatAdapter,
-  parsaTvAdapter,
-  persianTvLiveAdapter,
-  pakhshZendeAdapter,
-  m3uAdapter,
-  officialAdapter,
-];
+export const catalogSourceAdapters: CatalogSourceAdapter[] = [myTvSatAdapter, parsaTvAdapter, persianTvLiveAdapter, pakhshZendeAdapter, m3uAdapter, officialAdapter];
 
 export async function fetchCatalogSources(): Promise<CatalogSourceResult[]> {
   const results: CatalogSourceResult[] = [];
   for (const adapter of catalogSourceAdapters) {
     if (!adapter.isEnabled()) { results.push({ adapter: adapter.id, status: 'disabled', channels: [] }); continue; }
     if (!adapter.isConfigured()) { results.push({ adapter: adapter.id, status: 'unconfigured', channels: [], error: 'Optional source is not configured; source was skipped.' }); continue; }
-    try {
-      results.push({ adapter: adapter.id, status: 'ready', channels: await adapter.fetch() });
-    } catch (error) {
-      results.push({ adapter: adapter.id, status: 'failed', channels: [], error: error instanceof Error ? error.message : 'source fetch failed' });
-    }
+    try { results.push({ adapter: adapter.id, status: 'ready', channels: await adapter.fetch() }); }
+    catch (error) { results.push({ adapter: adapter.id, status: 'failed', channels: [], error: error instanceof Error ? error.message : 'source fetch failed' }); }
   }
   return results;
 }
