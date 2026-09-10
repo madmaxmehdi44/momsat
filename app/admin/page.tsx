@@ -35,6 +35,7 @@ type Upload = {
 };
 
 const labels: Record<string, string> = { category: 'Category', channel: 'Channel', source: 'Source', program: 'Program' };
+const formats = '.csv,.json,.m3u,.m3u8';
 
 export default function Admin() {
   const [data, setData] = useState<C[]>([]);
@@ -69,10 +70,10 @@ export default function Admin() {
       setUploads(u => u.map(x => x.id === item.id ? {
         ...x,
         status: ok ? 'done' : 'error',
-        message: j.error || `${labels[j.detectedTable] || j.detectedTable || 'Data'} | ${j.rows || 0} rows | +${j.created || 0} new | ${j.updated || 0} updated | ${j.skipped || 0} skipped`,
+        message: j.error || `${j.format === 'm3u' ? 'M3U Playlist' : (labels[j.detectedTable] || j.detectedTable || 'Data')} | ${j.rows || 0} entries | +${j.created || 0} created | ${j.updated || 0} updated | ${j.skipped || 0} skipped`,
         result: j,
       } : x));
-      setMsg(j.error || (ok ? `شناسايی ${labels[j.detectedTable] || j.detectedTable} انجام شد و دیتا وارد دیتابیس شد` : 'خطا در import'));
+      setMsg(j.error || (ok ? `شناسایی ${j.format === 'm3u' ? 'M3U' : (labels[j.detectedTable] || j.detectedTable)} انجام شد و دیتا وارد دیتابیس شد` : 'خطا در import'));
       if (ok) await load();
     } catch {
       setUploads(u => u.map(x => x.id === item.id ? { ...x, status: 'error', message: 'خطای شبکه' } : x));
@@ -112,7 +113,7 @@ export default function Admin() {
 
     <div className="eyebrow">ADMIN / UNIVERSAL INGESTION</div>
     <h1>مدیریت کاتالوگ و دیتابیس</h1>
-    <div className="notice">یک uploader برای همه دیتاها. فایل را انتخاب کن؛ سیستم schema را خودش تشخیص می‌دهد و مستقیم در جدول مناسب وارد یا بروزرسانی می‌کند.</div>
+    <div className="notice">یک uploader برای همه دیتاها. CSV، JSON یا M3U را انتخاب کن؛ سیستم نوع دیتا را خودش تشخیص می‌دهد، شبکه‌ها را dedupe می‌کند و رکوردهای Channel / Source را مستقیم وارد یا بروزرسانی می‌کند.</div>
 
     <div className="admin-kpis">
       <div className="kpi"><span className="muted">Channels</span><strong>{data.length}</strong></div>
@@ -124,13 +125,13 @@ export default function Admin() {
     <section style={{ marginTop: 22 }}>
       <div className="eyebrow">UNIVERSAL DATA UPLOAD</div>
       <h2 style={{ margin: '6px 0 4px' }}>آپلود خودکار</h2>
-      <p className="muted" style={{ marginTop: 0 }}>CSV و JSON ساختاریافته. بدون انتخاب Category / Channel / Source / Program.</p>
+      <p className="muted" style={{ marginTop: 0 }}>CSV / JSON / M3U / M3U8. بدون انتخاب دستی جدول.</p>
       <div className="notice" style={{ marginTop: 14, padding: 24, textAlign: 'center', borderStyle: 'dashed' }}>
-        <div style={{ fontSize: 18, fontWeight: 800 }}>فایل داده را انتخاب کن</div>
-        <div className="muted" style={{ marginTop: 7 }}>بعد از انتخاب، پردازش بدون مرحله اضافی شروع می‌شود.</div>
+        <div style={{ fontSize: 18, fontWeight: 800 }}>فایل داده یا playlist را انتخاب کن</div>
+        <div className="muted" style={{ marginTop: 7 }}>M3U به‌صورت خودکار به Channel + Source تبدیل می‌شود و group-title دسته‌بندی را می‌سازد.</div>
         <label className="btn primary" style={{ display: 'inline-block', marginTop: 18, cursor: sending ? 'not-allowed' : 'pointer', opacity: sending ? 0.65 : 1 }}>
           انتخاب فایل
-          <input hidden disabled={sending} type="file" accept=".csv,.json,text/csv,application/json" onChange={addFile} />
+          <input hidden disabled={sending} type="file" accept={`${formats},audio/x-mpegurl,application/vnd.apple.mpegurl`} onChange={addFile} />
         </label>
       </div>
     </section>
@@ -148,7 +149,7 @@ export default function Admin() {
       {uploads.length === 0 ? <div className="notice" style={{ marginTop: 12, textAlign: 'center', padding: 30 }}><strong>هنوز فایلی پردازش نشده است</strong></div> : <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
         {uploads.map(u => <div key={u.id} className="notice" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px,1fr) auto', gap: 14, alignItems: 'center' }}>
           <div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><strong>{u.file.name}</strong><span className="muted">{(u.file.size / 1024).toFixed(1)} KB</span>{u.result?.detectedTable && <span className="status">{labels[u.result.detectedTable] || u.result.detectedTable} · {Math.round((u.result.confidence || 0) * 100)}%</span>}</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><strong>{u.file.name}</strong><span className="muted">{(u.file.size / 1024).toFixed(1)} KB</span>{u.result?.format && <span className="status">{u.result.format.toUpperCase()}</span>}{u.result?.detectedTable && <span className="status">{labels[u.result.detectedTable] || u.result.detectedTable} · {Math.round((u.result.confidence || 0) * 100)}%</span>}</div>
             {u.message && <div className="muted" style={{ marginTop: 7 }}>{u.message}</div>}
             {u.result?.errors?.length ? <div style={{ marginTop: 5 }}>خطا: {u.result.errors[0]}</div> : null}
           </div>
