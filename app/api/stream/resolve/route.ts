@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { discoverMediaSources, isSafePublicUrl } from '../../../../../lib/web-source-extractor';
+import { discoverMediaSources, isSafePublicUrl } from '../../../../lib/web-source-extractor';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
