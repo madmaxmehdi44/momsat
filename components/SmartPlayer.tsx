@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import PlayerV3 from './PlayerV3';
+import PlayerV2 from './PlayerV2';
 import styles from './SmartPlayer.module.css';
 
 type Source = {
@@ -52,7 +52,7 @@ async function resolvePages(sources: Source[]) {
       return [] as ResolvedSource[];
     }
   }));
-  return Array.from(new Map(groups.flat().map((source) => [source.url, source])).values());
+  return Array.from(new Map(groups.flat().map((source) => [source.url.trim(), source])).values());
 }
 
 export default function SmartPlayer({ channel }: { channel: Channel }) {
@@ -101,7 +101,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
 
   if (directCandidates.length > 0) {
     const primary = directCandidates[0];
-    return <PlayerV3 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: allSources }} />;
+    return <PlayerV2 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: allSources }} />;
   }
 
   if (resolving) {
@@ -109,7 +109,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
   }
 
   if (resolved.length > 0) {
-    return <PlayerV3 channel={{ ...channel, image: posterImage, url: resolved[0].url, referer: resolved[0].referer, origin: resolved[0].origin, sources: resolved }} />;
+    return <PlayerV2 channel={{ ...channel, image: posterImage, url: resolved[0].url, referer: resolved[0].referer, origin: resolved[0].origin, sources: resolved }} />;
   }
 
   return (
