@@ -72,7 +72,10 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     void Promise.all(
       directCandidates.map(async (source, index) => {
         try {
-          const response = await fetch(`/api/stream/probe?url=${encodeURIComponent(source.url)}`, { cache: 'no-store' });
+          const params = new URLSearchParams({ url: source.url });
+          if (source.referer) params.set('referer', source.referer);
+          if (source.origin) params.set('origin', source.origin);
+          const response = await fetch(`/api/stream/probe?${params.toString()}`, { cache: 'no-store' });
           const probe = response.ok ? (await response.json() as Probe) : null;
           return { source, probe, index };
         } catch {
