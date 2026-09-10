@@ -13,6 +13,14 @@ export type ConfiguredChannel = {
   iran: boolean;
   popular: number;
   vip: boolean;
+  language: string | null;
+  country: string | null;
+  platform: string | null;
+  satellite: string | null;
+  frequency: string | null;
+  polarization: string | null;
+  symbolRate: string | null;
+  serviceId: string | null;
   category: string;
   categoryEn: string;
   sources: Array<{
@@ -43,6 +51,11 @@ function num(value: unknown, fallback = 0) {
 
 function bool(value: unknown) {
   return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+function nullable(value: unknown) {
+  const result = text(value);
+  return result || null;
 }
 
 function normalize(raw: unknown): ConfiguredChannel[] {
@@ -77,7 +90,7 @@ function normalize(raw: unknown): ConfiguredChannel[] {
       url,
       referer: text(row.referer ?? row.channel_referer) || null,
       origin: text(row.origin ?? row.channel_origin) || null,
-      country: text(row.country) || null,
+      country: nullable(row.country),
       vip: bool(row.vip ?? row.isvip),
     };
 
@@ -94,12 +107,13 @@ function normalize(raw: unknown): ConfiguredChannel[] {
           url: sourceUrl,
           referer: text(value.referer ?? value.channel_referer) || null,
           origin: text(value.origin ?? value.channel_origin) || null,
-          country: text(value.country) || null,
+          country: nullable(value.country),
           vip: bool(value.vip ?? value.isvip),
         }];
       }),
     ];
 
+    const satellite = nullable(row.satellite);
     return [{
       id: channelId,
       catId,
@@ -113,6 +127,14 @@ function normalize(raw: unknown): ConfiguredChannel[] {
       iran: bool(row.iran ?? row.for_iran),
       popular: num(row.popular),
       vip: bool(row.vip ?? row.isvip),
+      language: nullable(row.language) ?? 'fa',
+      country: nullable(row.country),
+      platform: nullable(row.platform) ?? (satellite ? 'SATELLITE' : 'INTERNET'),
+      satellite,
+      frequency: nullable(row.frequency ?? row.freq),
+      polarization: nullable(row.polarization ?? row.pol),
+      symbolRate: nullable(row.symbolRate ?? row.symbol_rate ?? row.sr),
+      serviceId: nullable(row.serviceId ?? row.service_id ?? row.sid),
       category,
       categoryEn,
       sources: Array.from(new Map(sources.map((source) => [source.url, source])).values()),
