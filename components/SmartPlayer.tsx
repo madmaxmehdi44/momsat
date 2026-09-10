@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import PlayerV2 from './PlayerV2';
+import PlayerDirectFirst from './PlayerDirectFirst';
 import styles from './SmartPlayer.module.css';
 
 type Source = {
@@ -168,7 +168,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       ...allSources.filter((source) => !verified.some((item) => item.url === source.url)),
     ];
     const primary = orderedSources[0];
-    return <PlayerV2 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
+    return <PlayerDirectFirst channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
   }
 
   if (resolving) {
