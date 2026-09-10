@@ -8,8 +8,6 @@ type Channel = { name?: string; image?: string | null; url?: string | null; refe
 type HlsInstance = { destroy: () => void; loadSource: (url: string) => void; attachMedia: (media: HTMLVideoElement) => void; startLoad: () => void; recoverMediaError: () => void; currentLevel: number; levels: Array<{ height?: number; bitrate?: number }>; on: (event: string, fn: (event: unknown, data: any) => void) => void };
 type HlsCtor = { new (config?: Record<string, unknown>): HlsInstance; isSupported: () => boolean; Events: Record<string, string> };
 
-auto:
-
 function usable(url: string) { return /^https?:\/\//i.test(url.trim()); }
 function proxied(source: Source) { const qs = new URLSearchParams({ url: source.url }); if (source.referer) qs.set('referer', source.referer); if (source.origin) qs.set('origin', source.origin); return `/api/stream?${qs}`; }
 function score(source: Source, index: number) { const u = source.url.toLowerCase(); let s = 0; if (u.includes('.m3u8')) s += 100; if (u.includes('playlist') || u.includes('stream')) s += 10; if (source.country === 'worldwide') s += 3; if (!source.vip) s += 2; return s - index / 1000; }
@@ -20,13 +18,13 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const hlsRef = useRef<HlsInstance | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const volumeRef = useRef(0.85);
-  const mutedRef = useRef(false);
+  const mutedRef = useRef(true);
   const [sourceIndex, setSourceIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState('');
   const [volume, setVolume] = useState(0.85);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [levels, setLevels] = useState<Array<{ index: number; label: string }>>([]);
   const [quality, setQuality] = useState(-1);
   const [showSources, setShowSources] = useState(false);
@@ -73,7 +71,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     const onPlaying = () => { if (!cancelled) { setLoading(false); setPlaying(true); } };
     const onPause = () => { if (!cancelled) setPlaying(false); };
     const onWaiting = () => { if (!cancelled) setLoading(true); };
-    const onLoaded = () => { if (!cancelled) { applyState(); setLoading(false); video.play().then(() => !cancelled && setPlaying(true)).catch(() => undefined); } };
+    const onLoaded = () => { if (!cancelled) { applyState(); setLoading(false); void video.play().then(() => !cancelled && setPlaying(true)).catch(() => undefined); } };
     const onError = () => failover('منبع فعلی قابل پخش نیست.');
     video.addEventListener('playing', onPlaying); video.addEventListener('pause', onPause); video.addEventListener('waiting', onWaiting); video.addEventListener('loadedmetadata', onLoaded); video.addEventListener('canplay', onLoaded); video.addEventListener('error', onError);
     video.pause(); video.removeAttribute('src'); video.load();
@@ -87,7 +85,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
         if (!Hls.isSupported()) { setLoading(false); setError('مرورگر فعلی پخش HLS را پشتیبانی نمی‌کند.'); return; }
         localHls = new Hls({ enableWorker: true, lowLatencyMode: true, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 8, backBufferLength: 30, maxBufferLength: 30, maxMaxBufferLength: 90, manifestLoadingMaxRetry: 3, levelLoadingMaxRetry: 4, fragLoadingMaxRetry: 4, capLevelToPlayerSize: true });
         hlsRef.current = localHls;
-        localHls.on(Hls.Events.MANIFEST_PARSED, () => { if (cancelled) return; setLevels(localHls!.levels.map((l, i) => ({ index: i, label: l.height ? `${l.height}p` : `${Math.round((l.bitrate ?? 0) / 1000)} kbps` }))); applyState(); setLoading(false); video.play().then(() => !cancelled && setPlaying(true)).catch(() => undefined); });
+        localHls.on(Hls.Events.MANIFEST_PARSED, () => { if (cancelled) return; setLevels(localHls!.levels.map((l, i) => ({ index: i, label: l.height ? `${l.height}p` : `${Math.round((l.bitrate ?? 0) / 1000)} kbps` }))); applyState(); setLoading(false); void video.play().then(() => !cancelled && setPlaying(true)).catch(() => undefined); });
         localHls.on(Hls.Events.ERROR, (_event, data) => {
           if (cancelled || !data?.fatal) return;
           if (data.type === 'mediaError') { localHls!.recoverMediaError(); return; }
@@ -104,12 +102,12 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   useEffect(() => { const video = videoRef.current; if (video) { video.volume = volume; video.muted = muted; } }, [volume, muted]);
   useEffect(() => { const fn = () => setFullscreen(document.fullscreenElement === rootRef.current); document.addEventListener('fullscreenchange', fn); return () => document.removeEventListener('fullscreenchange', fn); }, []);
 
-  const togglePlay = () => { const video = videoRef.current; if (!video) return; if (video.paused) video.play().then(() => setPlaying(true)).catch(() => undefined); else video.pause(); };
+  const togglePlay = () => { const video = videoRef.current; if (!video) return; if (video.paused) void video.play().then(() => setPlaying(true)).catch(() => undefined); else video.pause(); };
   const toggleFullscreen = async () => { if (!rootRef.current) return; try { if (document.fullscreenElement) await document.exitFullscreen(); else await rootRef.current.requestFullscreen(); } catch {} };
   const togglePip = async () => { const video = videoRef.current as HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> }; if (!video.requestPictureInPicture) return; try { await video.requestPictureInPicture(); } catch {} };
 
   return <div ref={rootRef} className="pro-player" tabIndex={0} onKeyDown={(e) => { if (e.key === ' ') { e.preventDefault(); togglePlay(); } if (e.key.toLowerCase() === 'f') void toggleFullscreen(); if (e.key.toLowerCase() === 'm') setMuted((v) => !v); }}>
-    <video ref={videoRef} className="pro-player-video" poster={channel.image || undefined} playsInline preload="metadata" onDoubleClick={() => void toggleFullscreen()} />
+    <video ref={videoRef} className="pro-player-video" poster={channel.image || undefined} playsInline preload="metadata" muted={muted} onDoubleClick={() => void toggleFullscreen()} />
     {loading && !error && <div className="pro-player-loader"><span className="spinner"/><span>در حال اتصال به پخش زنده…</span></div>}
     {error && <div className="pro-player-error"><div><div className="pro-player-error-title">پخش متوقف شد</div><div className="muted">{error}</div><button className="pro-player-retry" onClick={() => selectSource(sourceIndex)}><RotateCcw size={15}/> تلاش مجدد</button></div></div>}
     <div className="pro-player-top"><div className="pro-player-live"><span/> LIVE</div><div className="pro-player-channel">{channel.name || 'MOMSAT'}</div>{sources.length > 1 && <button className="icon-button" onClick={() => setShowSources((v) => !v)} title="مسیرها"><Settings size={18}/></button>}</div>
