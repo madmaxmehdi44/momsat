@@ -18,7 +18,7 @@ type DbChannel = Awaited<ReturnType<typeof prisma.channel.findMany>>[number] & {
 
 function toCatalog(channel: DbChannel): Channel {
   const primary = channel.url
-    ? [{ id: null, title: 'Primary', url: channel.url, referer: channel.referer, origin: channel.origin, country: null, vip: channel.vip }]
+    ? [{ id: null, title: 'Primary', url: channel.url, referer: channel.referer, origin: channel.origin, country: channel.country ?? null, vip: channel.vip }]
     : [];
   const sources = Array.from(new Map([...primary, ...channel.sources].map((source) => [source.url, source])).values());
   return {
@@ -34,6 +34,14 @@ function toCatalog(channel: DbChannel): Channel {
     iran: channel.iran,
     popular: Number(channel.popular),
     vip: channel.vip,
+    language: channel.language,
+    country: channel.country,
+    platform: channel.platform,
+    satellite: channel.satellite,
+    frequency: channel.frequency,
+    polarization: channel.polarization,
+    symbolRate: channel.symbolRate,
+    serviceId: channel.serviceId,
     category: channel.categoryName || channel.category.name,
     categoryEn: channel.categoryNameEn || channel.category.nameEn,
     sources,
