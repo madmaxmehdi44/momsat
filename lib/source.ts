@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
+import { discoverMediaSources } from './web-source-extractor';
 
 export type RawSource = {
   ID?: number;
@@ -119,23 +120,6 @@ function absoluteUrl(value: string, base: string) {
 
 function unique(values: string[]) { return Array.from(new Set(values.filter(Boolean))); }
 
-function mediaUrls(html: string, pageUrl: string) {
-  const found: string[] = [];
-  const patterns = [
-    /(?:src|data-src|data-url|file|source)=["']([^"']+)["']/gi,
-    /https?:\\?\/\\?\/[^"'\s<>]+\.(?:m3u8|mp4)(?:\?[^"'\s<>]*)?/gi,
-    /https?:\\?\/\\?\/[^"'\s<>]*(?:m3u8|playlist|stream)[^"'\s<>]*/gi,
-  ];
-  for (const pattern of patterns) {
-    for (const match of html.matchAll(pattern)) {
-      const candidate = decodeHtml(match[1] ?? match[0]).replace(/\\\//g, '/');
-      const url = absoluteUrl(candidate, pageUrl);
-      if (url && /^(https?:|rtmp:)/i.test(url) && !/\.jpg|\.png|\.webp|\.gif/i.test(url)) found.push(url);
-    }
-  }
-  return unique(found).filter((url) => /m3u8|mp4|stream|playlist|embed/i.test(url));
-}
-
 function extractAnchors(html: string, pageUrl: string) {
   const links: { href: string; text: string }[] = [];
   const pattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -195,18 +179,40 @@ function siteChannel(name: string, pageUrl: string, streamUrls: string[], image:
 async function discoverSite(indexUrl: string, adapterId: string, pathPattern: RegExp) {
   const indexHtml = await fetchText(indexUrl);
   const anchors = extractAnchors(indexHtml, indexUrl);
-  const candidates = Array.from(new Map(anchors.filter((link) => pathPattern.test(link.href) && link.href !== indexUrl).map((link) => [link.href, link])).values()).slice(0, envInt('SOURCE_SITE_MAX_CHANNELS', 250, 1, 1000));
+  const candidates = Array.from(new Map(
+    anchors
+      .filter((link) => pathPattern.test(link.href) && link.href !== indexUrl)
+      .map((link) => [link.href, link]),
+  ).values()).slice(0, envInt('SOURCE_SITE_MAX_CHANNELS', 250, 1, 1000));
+
   const results: Channel[] = [];
   const concurrency = envInt('SOURCE_SITE_CONCURRENCY', 6, 1, 20);
   for (let i = 0; i < candidates.length; i += concurrency) {
     const batch = candidates.slice(i, i + concurrency);
     const discovered = await Promise.all(batch.map(async (candidate) => {
       try {
-        const html = await fetchText(candidate.href);
-        const streams = mediaUrls(html, candidate.href);
+        const page = await fetchText(candidate.href);
+        const discovery = await discoverMediaSources(candidate.href);
+        const streams = unique(discovery.sources.map((source) => source.url));
         if (!streams.length) return null;
-        return siteChannel(candidate.text, candidate.href, streams, htmlImage(html, candidate.href), adapterId);
-      } catch { return null; }
+        const sourceMetadata = discovery.sources.filter((source, index, all) => all.findIndex((item) => item.url === source.url) === index);
+        const channel = siteChannel(candidate.text, candidate.href, streams, htmlImage(page, candidate.href), adapterId);
+        channel.sources = sourceMetadata.map((source, index) => ({
+          id: stableId(`${adapterId}:source:${source.url}`),
+          title: `${candidate.text} source ${index + 1}`,
+          url: source.url,
+          referer: source.referer || candidate.href,
+          origin: source.origin || new URL(candidate.href).origin,
+          country: null,
+          vip: false,
+        }));
+        channel.url = channel.sources[0]?.url ?? channel.url;
+        channel.referer = channel.sources[0]?.referer ?? channel.referer;
+        channel.origin = channel.sources[0]?.origin ?? channel.origin;
+        return channel;
+      } catch {
+        return null;
+      }
     }));
     results.push(...discovered.filter((item): item is Channel => Boolean(item)));
   }
