@@ -23,8 +23,7 @@ function norm(value: unknown) {
     .replace(/[\u064B-\u065F]/g, '')
     .replace(/[\t\r\n]+/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
+    .trim().toLowerCase();
 }
 
 function stableInt(key: string) {
@@ -52,39 +51,22 @@ function parseAttributes(text: string) {
   return attrs;
 }
 
-function parseDirectiveValue(line: string) {
-  const index = line.indexOf(':');
-  return index >= 0 ? line.slice(index + 1).trim() : '';
-}
-
-function isUrl(value: string) {
-  return /^https?:\/\//i.test(value.trim());
-}
-
 function parseM3u(text: string): M3uEntry[] {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
   const entries: M3uEntry[] = [];
   let pending: Omit<M3uEntry, 'url'> | null = null;
-
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#EXTM3U')) continue;
-
     if (line.startsWith('#EXTINF:')) {
       const comma = line.indexOf(',');
       const header = comma >= 0 ? line.slice(8, comma) : line.slice(8);
       const displayName = comma >= 0 ? line.slice(comma + 1).trim() : '';
       const attrs = parseAttributes(header);
       const name = attrs['tvg-name'] || displayName || attrs['tvg-id'] || 'Unnamed channel';
-      pending = {
-        name,
-        attrs,
-        referer: null,
-        origin: null,
-      };
+      pending = { name, attrs, referer: null, origin: null };
       continue;
     }
-
     if (line.startsWith('#EXTVLCOPT:')) {
       if (!pending) continue;
       const directive = line.slice('#EXTVLCOPT:'.length);
@@ -95,59 +77,38 @@ function parseM3u(text: string): M3uEntry[] {
       if (key === 'http-origin') pending.origin = value || null;
       continue;
     }
-
-    if (line.startsWith('#EXTHTTP:')) {
-      if (!pending) continue;
-      const directive = parseDirectiveValue(line);
-      const separator = directive.indexOf('=');
-      const key = separator >= 0 ? directive.slice(0, separator).trim().toLowerCase() : '';
-      const value = separator >= 0 ? directive.slice(separator + 1).trim() : '';
-      if (key === 'referer' || key === 'referrer') pending.referer = value || null;
-      if (key === 'origin') pending.origin = value || null;
-      continue;
-    }
-
     if (line.startsWith('#')) continue;
     const url = cleanUrl(line);
-    if (!pending || !url || !isUrl(url)) continue;
+    if (!pending || !url) continue;
     entries.push({ ...pending, url });
     pending = null;
   }
-
   return entries;
 }
 
-function firstToken(value: string) {
-  return value.split(/[;,|]/).map(v => v.trim()).filter(Boolean)[0] || '';
-}
-
 function categoryFor(entry: M3uEntry) {
-  const group = firstToken(entry.attrs['group-title'] || '');
+  const group = (entry.attrs['group-title'] || '').split(/[;,|]/).map(v => v.trim()).filter(Boolean)[0] || '';
   const value = norm(group);
   const known: Array<[RegExp, string, string]> = [
     [/news|خبر/, 'News', 'news'],
-    [/sport|sports|ورزش/, 'Sports', 'sports'],
+    [/sport|ورزش/, 'Sports', 'sports'],
     [/music|موزیک|موسیقی/, 'Music', 'music'],
-    [/movie|movies|film|فیلم/, 'Movies & Series', 'movies-series'],
-    [/series|سریال/, 'Movies & Series', 'movies-series'],
+    [/movie|film|فیلم|series|سریال/, 'Movies & Series', 'movies-series'],
     [/kids|child|کودک/, 'Kids', 'kids'],
     [/documentary|مستند/, 'Documentary', 'documentary'],
     [/relig|quran|قرآن|مذهبی/, 'Religion', 'religion'],
     [/entertain|سرگرمی/, 'Entertainment', 'entertainment'],
   ];
   for (const [pattern, name, nameEn] of known) if (pattern.test(value)) return { name, nameEn };
-  if (group) return { name: group, nameEn: group };
-  return { name: 'Other', nameEn: 'other' };
+  return group ? { name: group, nameEn: group } : { name: 'Other', nameEn: 'other' };
 }
 
 async function ensureCategory(group: { name: string; nameEn: string }) {
   const existing = await prisma.category.findFirst({ where: { OR: [{ name: group.name }, { nameEn: group.nameEn }] }, select: { id: true } });
   if (existing) return existing.id;
   const id = stableInt(`m3u-category:${norm(group.nameEn)}`);
-  const collision = await prisma.category.findUnique({ where: { id }, select: { id: true } });
-  if (collision) return collision.id;
-  const created = await prisma.category.create({ data: { id, name: group.name, nameEn: group.nameEn }, select: { id: true } });
-  return created.id;
+  if (await prisma.category.findUnique({ where: { id }, select: { id: true } })) return id;
+  return (await prisma.category.create({ data: { id, name: group.name, nameEn: group.nameEn }, select: { id: true } })).id;
 }
 
 async function uniqueChannelId(key: string) {
@@ -165,10 +126,7 @@ async function uniqueSourceId(channelId: number, url: string) {
 export async function importM3u(text: string): Promise<M3uImportResult> {
   const entries = parseM3u(text);
   if (!entries.length) throw new Error('No valid HTTP(S) M3U entries were found.');
-
-  let created = 0;
-  let updated = 0;
-  let skipped = 0;
+  let created = 0, updated = 0, skipped = 0;
   const errors: string[] = [];
   const channelCache = new Map<string, number>();
 
@@ -193,96 +151,44 @@ export async function importM3u(text: string): Promise<M3uImportResult> {
       const iran = ['ir', 'iran'].includes(norm(country));
 
       let channelId = channelCache.get(catalogKey) || 0;
-      if (!channelId) {
-        const existing = await prisma.channel.findUnique({ where: { catalogKey }, select: { id: true } });
+      let existing = channelId ? await prisma.channel.findUnique({ where: { id: channelId }, select: { id: true, catalogKey: true } }) : null;
+      if (!existing) {
+        existing = await prisma.channel.findUnique({ where: { catalogKey }, select: { id: true, catalogKey: true } });
         if (existing) channelId = existing.id;
       }
       if (!channelId) {
-        const existing = await prisma.channel.findFirst({ where: { OR: [{ name }, { nameEn }, { url }] }, select: { id: true } });
+        existing = await prisma.channel.findFirst({ where: { OR: [{ name }, { nameEn }, { url }] }, select: { id: true, catalogKey: true } });
         if (existing) channelId = existing.id;
       }
 
       if (!channelId) {
         channelId = await uniqueChannelId(catalogKey);
         await prisma.channel.create({
-          data: {
-            id: channelId,
-            name,
-            nameEn,
-            catalogKey,
-            image: logo,
-            url,
-            referer: entry.referer,
-            origin: entry.origin,
-            vpn,
-            iran,
-            popular: 0,
-            vip: false,
-            language,
-            country,
-            platform: satellite ? 'SATELLITE + INTERNET' : 'INTERNET',
-            satellite,
-            frequency,
-            polarization,
-            symbolRate,
-            serviceId,
-            categoryId,
-            categoryName: category.name,
-            categoryNameEn: category.nameEn,
-          },
+          data: { id: channelId, name, nameEn, catalogKey, image: logo, url, referer: entry.referer, origin: entry.origin, vpn, iran, popular: 0, vip: false,
+            language, country, platform: satellite ? 'SATELLITE + INTERNET' : 'INTERNET', satellite, frequency, polarization, symbolRate, serviceId,
+            categoryId, categoryName: category.name, categoryNameEn: category.nameEn },
         });
         created += 1;
       } else {
+        const nextCatalogKey = existing?.catalogKey || catalogKey;
         await prisma.channel.update({
           where: { id: channelId },
-          data: {
-            catalogKey,
-            image: logo || undefined,
-            url,
-            referer: entry.referer || undefined,
-            origin: entry.origin || undefined,
-            language: language || undefined,
-            country: country || undefined,
-            platform: satellite ? 'SATELLITE + INTERNET' : undefined,
-            satellite: satellite || undefined,
-            frequency: frequency || undefined,
-            polarization: polarization || undefined,
-            symbolRate: symbolRate || undefined,
-            serviceId: serviceId || undefined,
-            categoryId,
-            categoryName: category.name,
-            categoryNameEn: category.nameEn,
-            vpn: vpn || undefined,
-            iran: iran || undefined,
-          },
+          data: { catalogKey: nextCatalogKey, image: logo || undefined, url, referer: entry.referer || undefined, origin: entry.origin || undefined,
+            language: language || undefined, country: country || undefined, platform: satellite ? 'SATELLITE + INTERNET' : undefined, satellite: satellite || undefined,
+            frequency: frequency || undefined, polarization: polarization || undefined, symbolRate: symbolRate || undefined, serviceId: serviceId || undefined,
+            categoryId, categoryName: category.name, categoryNameEn: category.nameEn, vpn: vpn || undefined, iran: iran || undefined },
         });
         updated += 1;
       }
       channelCache.set(catalogKey, channelId);
 
       const duplicate = await prisma.source.findFirst({ where: { channelId, url }, select: { id: true } });
-      if (duplicate) {
-        skipped += 1;
-        continue;
-      }
-
-      await prisma.source.create({
-        data: {
-          id: await uniqueSourceId(channelId, url),
-          channelId,
-          title: entry.name,
-          url,
-          referer: entry.referer,
-          origin: entry.origin,
-          country,
-          vip: false,
-        },
-      });
+      if (duplicate) { skipped += 1; continue; }
+      await prisma.source.create({ data: { id: await uniqueSourceId(channelId, url), channelId, title: entry.name, url, referer: entry.referer, origin: entry.origin, country, vip: false } });
       created += 1;
     } catch (error) {
       errors.push(`entry ${i + 1}: ${error instanceof Error ? error.message : 'import failed'}`);
     }
   }
-
   return { rows: entries.length, created, updated, skipped, errors };
 }
