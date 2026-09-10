@@ -287,12 +287,11 @@ const pakhshZendeAdapter: CatalogSourceAdapter = {
 };
 
 const iranInternationalAdapter: CatalogSourceAdapter = {
-  id: 'iran-international-official', name: 'Iran International official live', optional: true,
+  id: 'iran-international-official', name: 'Iran International official live', optional: false,
   isEnabled: () => envFlag('SOURCE_IRANINTL_ENABLED', true),
-  isConfigured: () => Boolean(process.env.SOURCE_IRANINTL_LIVE_URL?.trim()),
+  isConfigured: () => Boolean((process.env.SOURCE_IRANINTL_LIVE_URL?.trim() || 'https://www.iranintl.com/fa/live').trim()),
   async fetch() {
-    const url = process.env.SOURCE_IRANINTL_LIVE_URL!.trim();
-    const image = process.env.SOURCE_IRANINTL_LOGO_URL?.trim() || null;
+    const url = process.env.SOURCE_IRANINTL_LIVE_URL?.trim() || 'https://www.iranintl.com/fa/live';
     const channelId = stableId('official:iran-international');
     const categoryId = stableId('official:news');
     return [{
@@ -300,7 +299,7 @@ const iranInternationalAdapter: CatalogSourceAdapter = {
       catId: categoryId,
       name: 'Iran International',
       nameEn: 'Iran International',
-      image,
+      image: null,
       url,
       referer: new URL(url).origin,
       origin: new URL(url).origin,
@@ -311,11 +310,11 @@ const iranInternationalAdapter: CatalogSourceAdapter = {
       language: 'fa',
       country: 'UK',
       platform: 'INTERNET',
-      satellite: process.env.SOURCE_IRANINTL_SATELLITE?.trim() || null,
-      frequency: process.env.SOURCE_IRANINTL_FREQUENCY?.trim() || null,
-      polarization: process.env.SOURCE_IRANINTL_POLARIZATION?.trim() || null,
-      symbolRate: process.env.SOURCE_IRANINTL_SYMBOL_RATE?.trim() || null,
-      serviceId: process.env.SOURCE_IRANINTL_SERVICE_ID?.trim() || null,
+      satellite: 'Hotbird 13E',
+      frequency: '11137 MHz',
+      polarization: 'Horizontal',
+      symbolRate: '27500',
+      serviceId: null,
       category: 'News',
       categoryEn: 'news',
       sources: [{ id: stableId('official:iran-international:source'), title: 'Official Live', url, referer: new URL(url).origin, origin: new URL(url).origin, country: 'UK', vip: false }],
