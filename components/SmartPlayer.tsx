@@ -50,6 +50,8 @@ async function resolvePages(sources: Source[]) {
   const groups = await Promise.all(queue.map(async (source) => {
     try {
       const params = new URLSearchParams({ url: source.url });
+      if (source.referer) params.set('referer', source.referer);
+      if (source.origin) params.set('origin', source.origin);
       const response = await fetch(`/api/stream/resolve?${params.toString()}`, { cache: 'no-store' });
       if (!response.ok) return [] as ResolvedSource[];
       const body = await response.json() as { sources?: ResolvedSource[] };
@@ -80,7 +82,7 @@ async function probeSource(source: Source) {
 }
 
 async function verifySources(sources: Source[]) {
-  const candidates = sources.slice(0, 10);
+  const candidates = sources.slice(0, 12);
   const results = await Promise.all(candidates.map(async (source, index) => {
     const probe = await probeSource(source);
     return probe ? { source, index, latencyMs: probe.latencyMs ?? Number.MAX_SAFE_INTEGER } : null;
@@ -103,7 +105,6 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
   const [resolved, setResolved] = useState<ResolvedSource[]>([]);
   const [verified, setVerified] = useState<Source[]>([]);
   const [resolving, setResolving] = useState(false);
-  const [verifying, setVerifying] = useState(false);
   const [resolutionError, setResolutionError] = useState('');
 
   useEffect(() => {
@@ -143,48 +144,35 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     let cancelled = false;
     if (!allSources.length) {
       setVerified([]);
-      setVerifying(false);
       return () => { cancelled = true; };
     }
 
-    setVerifying(true);
+    // Probing is advisory. The player must still receive every candidate so its runtime failover can try sources a probe could not classify.
     void verifySources(allSources).then((playableSources) => {
       if (cancelled) return;
       setVerified(playableSources);
-      setVerifying(false);
-      if (!playableSources.length && !resolving) {
-        setResolutionError('هیچ منبع پخش سالمی پاسخ نداد.');
-      }
     }).catch(() => {
-      if (cancelled) return;
-      setVerified([]);
-      setVerifying(false);
-      if (!resolving) setResolutionError('بررسی سلامت منابع پخش ناموفق بود.');
+      if (cancelled) setVerified([]);
     });
 
     return () => { cancelled = true; };
-  }, [allSources, resolving]);
+  }, [allSources]);
 
   const posterImage = channel.image
     ? `/api/channel-thumbnail?url=${encodeURIComponent(channel.image)}&name=${encodeURIComponent(channel.name || 'TV')}`
     : null;
 
-  // Source probing is advisory. Do not block the player while it runs or if every probe is inconclusive.
-  if (directCandidates.length > 0) {
-    const orderedSources = verified.length > 0
-      ? [...verified, ...directCandidates.filter((source) => !verified.some((item) => item.url === source.url))]
-      : directCandidates;
+  if (allSources.length > 0) {
+    const orderedSources = [
+      ...verified,
+      ...allSources.filter((source) => !verified.some((item) => item.url === source.url)),
+    ];
     const primary = orderedSources[0];
     return <PlayerV2 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
   }
 
   if (resolving) {
     return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
-  }
-
-  if (verified.length > 0) {
-    const primary = verified[0];
-    return <PlayerV2 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: verified }} />;
   }
 
   return (
