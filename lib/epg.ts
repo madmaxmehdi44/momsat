@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 
 export type EpgProgram = {
@@ -13,6 +14,19 @@ export type EpgProgram = {
   start: Date;
   end: Date;
 };
+
+export type EpgProgramWithChannel = Prisma.ProgramGetPayload<{
+  include: {
+    channel: {
+      select: {
+        id: true;
+        name: true;
+        nameEn: true;
+        image: true;
+      };
+    };
+  };
+}>;
 
 type EpgChannelInput = {
   id: string;
@@ -163,7 +177,9 @@ export async function syncEpg() {
   return { status: 'ready' as const, sources: urls.length, channels: channelInputs.length, matchedChannels, programs: activePrograms.length };
 }
 
-export async function getEpg(options?: { channelId?: number; from?: Date; to?: Date }) {
+export async function getEpg(
+  options?: { channelId?: number; from?: Date; to?: Date }
+): Promise<EpgProgramWithChannel[]> {
   const from = options?.from ?? new Date();
   const to = options?.to ?? new Date(from.getTime() + 24 * 60 * 60_000);
   return prisma.program.findMany({
