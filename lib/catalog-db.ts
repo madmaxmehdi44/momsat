@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { featuredChannels, mergeFeaturedChannels } from './featured-channels';
 import { fetchCatalog, categoriesOf, Channel } from './source';
 
 export type { Channel };
@@ -56,7 +57,7 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
       orderBy: [{ popular: 'desc' }, { name: 'asc' }],
       include: dbInclude,
     });
-    return rows.map(toCatalog);
+    return mergeFeaturedChannels(rows.map(toCatalog));
   } catch (error) {
     console.warn('[catalog-db] Database unavailable, falling back to configured catalog sources.', error);
     return null;
@@ -66,7 +67,7 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
 export async function getCatalog() {
   const databaseCatalog = await fetchCatalogFromDb();
   if (databaseCatalog && databaseCatalog.length > 0) return databaseCatalog;
-  return fetchCatalog();
+  return mergeFeaturedChannels(await fetchCatalog());
 }
 
 export function getCategories(channels: Channel[]) {
@@ -79,12 +80,12 @@ export async function findChannel(id: number) {
   if (process.env.DATABASE_URL?.trim()) {
     try {
       const row = await prisma.channel.findUnique({ where: { id }, include: dbInclude });
-      if (row) return toCatalog(row);
+      if (row) return mergeFeaturedChannels([toCatalog(row)])[0] ?? null;
     } catch (error) {
       console.warn('[catalog-db] Database unavailable while resolving channel, using source catalog.', error);
     }
   }
 
-  const channels = await fetchCatalog();
+  const channels = mergeFeaturedChannels(await fetchCatalog());
   return channels.find((channel) => channel.id === id) ?? null;
 }
