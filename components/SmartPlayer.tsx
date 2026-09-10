@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import PlayerPro from './PlayerPro';
+import PlayerProEnhanced from './PlayerProEnhanced';
 import styles from './SmartPlayer.module.css';
 
 type Source = {
@@ -163,7 +163,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       ...allSources.filter((source) => !verified.some((item) => item.url === source.url)),
     ];
     const primary = orderedSources[0];
-    return <PlayerPro channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
+    return <PlayerProEnhanced channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
   }
 
   if (resolving) return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
