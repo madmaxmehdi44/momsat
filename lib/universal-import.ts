@@ -1,5 +1,6 @@
 import type { CsvTable } from './table-csv-import';
 import { importTable, parseCsv } from './table-csv-import';
+import { importSourceCsvFast } from './table-source-import-fast';
 import { importM3u } from './m3u-import';
 
 export type UniversalImportDetection = {
@@ -114,6 +115,8 @@ export async function detectAndImportUpload(fileName: string, text: string) {
 
   const rows = parseCsv(trimmed);
   const detected = detectRows(rows);
-  const result = await importTable(detected.table, trimmed);
+  const result = detected.table === 'source'
+    ? await importSourceCsvFast(trimmed)
+    : await importTable(detected.table, trimmed);
   return { ...detected, format: 'csv' as const, result };
 }
