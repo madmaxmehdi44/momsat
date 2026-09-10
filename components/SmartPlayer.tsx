@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import PlayerDirectFirst from './PlayerDirectFirst';
+import PlayerReliable from './PlayerReliable';
 import styles from './SmartPlayer.module.css';
 
 type Source = {
@@ -147,7 +147,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       return () => { cancelled = true; };
     }
 
-    // Probing is advisory. The player must still receive every candidate so its runtime failover can try sources a probe could not classify.
+    // Probing is advisory. The player still receives every candidate for runtime failover.
     void verifySources(allSources).then((playableSources) => {
       if (cancelled) return;
       setVerified(playableSources);
@@ -168,7 +168,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       ...allSources.filter((source) => !verified.some((item) => item.url === source.url)),
     ];
     const primary = orderedSources[0];
-    return <PlayerDirectFirst channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
+    return <PlayerReliable channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
   }
 
   if (resolving) {
