@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import PlayerReliable from './PlayerReliable';
+import PlayerPro from './PlayerPro';
 import styles from './SmartPlayer.module.css';
 
 type Source = {
@@ -14,6 +14,7 @@ type Source = {
 };
 
 type Channel = {
+  id?: number;
   name?: string;
   image?: string | null;
   url?: string | null;
@@ -99,7 +100,7 @@ async function verifySources(sources: Source[]) {
 }
 
 export default function SmartPlayer({ channel }: { channel: Channel }) {
-  const candidates = useMemo(() => databaseCandidates(channel), [channel.url, channel.referer, channel.origin, channel.sources]);
+  const candidates = useMemo(() => databaseCandidates(channel), [channel.id, channel.url, channel.referer, channel.origin, channel.sources]);
   const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
   const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url)), [candidates]);
   const [resolved, setResolved] = useState<ResolvedSource[]>([]);
@@ -123,9 +124,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       if (cancelled) return;
       setResolved(discovered);
       setResolving(false);
-      if (!discovered.length && !directCandidates.length) {
-        setResolutionError('هیچ مسیر مستقیم قابل پخش از منابع دیتابیس پیدا نشد.');
-      }
+      if (!discovered.length && !directCandidates.length) setResolutionError('هیچ مسیر مستقیم قابل پخش از منابع دیتابیس پیدا نشد.');
     }).catch(() => {
       if (cancelled) return;
       setResolving(false);
@@ -146,15 +145,11 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       setVerified([]);
       return () => { cancelled = true; };
     }
-
-    // Probing is advisory. The player still receives every candidate for runtime failover.
     void verifySources(allSources).then((playableSources) => {
-      if (cancelled) return;
-      setVerified(playableSources);
+      if (!cancelled) setVerified(playableSources);
     }).catch(() => {
-      if (cancelled) setVerified([]);
+      if (!cancelled) setVerified([]);
     });
-
     return () => { cancelled = true; };
   }, [allSources]);
 
@@ -168,16 +163,9 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       ...allSources.filter((source) => !verified.some((item) => item.url === source.url)),
     ];
     const primary = orderedSources[0];
-    return <PlayerReliable channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
+    return <PlayerPro channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
   }
 
-  if (resolving) {
-    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
-  }
-
-  return (
-    <div className={styles.embedPlayer}>
-      <div className={styles.probing}>{resolutionError || 'برای این شبکه مسیر پخش در دیتابیس ثبت نشده است.'}</div>
-    </div>
-  );
+  if (resolving) return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
+  return <div className={styles.embedPlayer}><div className={styles.probing}>{resolutionError || 'برای این شبکه مسیر پخش در دیتابیس ثبت نشده است.'}</div></div>;
 }
