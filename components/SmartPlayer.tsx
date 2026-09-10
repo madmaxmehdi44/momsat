@@ -49,12 +49,13 @@ function uniqueCandidates(channel: Channel) {
 }
 
 async function probeSources(sources: Source[]) {
+  if (!sources.length) return [] as Source[];
   const results = await Promise.all(sources.map(async (source, index) => {
     try {
       const params = new URLSearchParams({ url: source.url });
       if (source.referer) params.set('referer', source.referer);
       if (source.origin) params.set('origin', source.origin);
-      const response = await fetch(`/api/stream/probe?${params.toString()}`);
+      const response = await fetch(`/api/stream/probe?${params.toString()}`, { cache: 'force-cache' });
       const probe = response.ok ? await response.json() as Probe : null;
       return { source, probe, index };
     } catch {
@@ -66,6 +67,22 @@ async function probeSources(sources: Source[]) {
     .filter((item) => item.probe?.playable)
     .sort((a, b) => (a.probe?.latencyMs ?? Number.MAX_SAFE_INTEGER) - (b.probe?.latencyMs ?? Number.MAX_SAFE_INTEGER) || a.index - b.index)
     .map((item) => item.source);
+}
+
+async function resolvePages(sources: Source[]) {
+  const queue = sources.slice(0, 6);
+  const groups = await Promise.all(queue.map(async (source) => {
+    try {
+      const params = new URLSearchParams({ url: source.url });
+      const response = await fetch(`/api/stream/resolve?${params.toString()}`, { cache: 'force-cache' });
+      if (!response.ok) return [] as ResolvedSource[];
+      const body = await response.json() as { sources?: ResolvedSource[] };
+      return body.sources ?? [];
+    } catch {
+      return [] as ResolvedSource[];
+    }
+  }));
+  return Array.from(new Map(groups.flat().map((source) => [source.url, source])).values());
 }
 
 export default function SmartPlayer({ channel }: { channel: Channel }) {
@@ -80,21 +97,22 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
 
   useEffect(() => {
     let cancelled = false;
+    setSelected(null);
     setResolved([]);
     setResolutionError('');
-
     if (!directCandidates.length) {
-      setSelected(null);
       setProbing(false);
       return () => { cancelled = true; };
     }
 
     setProbing(true);
-    setSelected(null);
-
     void probeSources(directCandidates).then((playable) => {
       if (cancelled) return;
-      setSelected(playable[0] ?? null);
+      if (playable.length) {
+        setSelected(playable[0]);
+        setProbing(false);
+        return;
+      }
       setProbing(false);
     });
 
@@ -103,35 +121,30 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
 
   useEffect(() => {
     let cancelled = false;
-    if (directCandidates.length > 0 || pageCandidates.length === 0) {
+    if (!pageCandidates.length) {
+      setResolving(false);
+      return () => { cancelled = true; };
+    }
+    if (selected || directCandidates.length > 0 && probing) {
       setResolving(false);
       return () => { cancelled = true; };
     }
 
     setResolving(true);
-    setResolutionError('');
-
-    const queue = pageCandidates.slice(0, 4);
-    void Promise.all(queue.map(async (source) => {
-      try {
-        const params = new URLSearchParams({ url: source.url });
-        const response = await fetch(`/api/stream/resolve?${params.toString()}`);
-        if (!response.ok) return [] as ResolvedSource[];
-        const body = await response.json() as { sources?: ResolvedSource[] };
-        return body.sources ?? [];
-      } catch {
-        return [] as ResolvedSource[];
-      }
-    })).then(async (groups) => {
+    void resolvePages(pageCandidates).then(async (discovered) => {
       if (cancelled) return;
-      const discovered = Array.from(new Map(groups.flat().map((source) => [source.url, source])).values());
+      if (!discovered.length) {
+        setResolving(false);
+        setResolutionError('هیچ مسیر مستقیم قابل پخش از صفحهٔ شبکه پیدا نشد.');
+        return;
+      }
       const playable = await probeSources(discovered);
       if (cancelled) return;
       if (playable.length) {
-        setResolved(playable);
+        setResolved(playable as ResolvedSource[]);
         setSelected(playable[0]);
       } else {
-        setResolutionError('از صفحه‌ی منبع، مسیر مستقیم قابل پخش پیدا نشد.');
+        setResolutionError('منبع استخراج شد، اما هیچ مسیر پخش زنده‌ای پاسخ قابل پخش نداد.');
       }
       setResolving(false);
     }).catch(() => {
@@ -141,35 +154,34 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     });
 
     return () => { cancelled = true; };
-  }, [directCandidates.length, pageCandidates]);
+  }, [directCandidates.length, pageCandidates, probing, selected]);
 
-  if (directCandidates.length > 0) {
-    if (probing) {
-      return <div className={styles.embedPlayer}><div className={styles.probing}>در حال بررسی مسیرهای پخش زنده…</div></div>;
-    }
+  if (probing) {
+    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال پیدا کردن سریع‌ترین مسیر پخش…</div></div>;
+  }
 
-    if (selected) {
-      const remaining = directCandidates.filter((source) => source.url !== selected.url);
-      return <PlayerV2 channel={{ ...channel, url: selected.url, referer: selected.referer, origin: selected.origin, sources: [selected, ...remaining] }} />;
-    }
+  if (selected) {
+    const all = selected.url
+      ? [selected, ...directCandidates, ...resolved].filter((source, index, list) => list.findIndex((item) => item.url === source.url) === index)
+      : [...directCandidates, ...resolved];
+    return <PlayerV2 channel={{ ...channel, url: selected.url, referer: selected.referer, origin: selected.origin, sources: all }} />;
+  }
 
+  if (directCandidates.length > 0 && !pageCandidates.length) {
     return <PlayerV2 channel={{ ...channel, sources: directCandidates }} />;
   }
 
   if (resolving) {
-    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج منبع واقعی پخش از سرویس‌دهنده…</div></div>;
+    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر واقعی پخش از سرویس‌دهنده…</div></div>;
   }
 
-  if (selected || resolved.length > 0) {
-    const sources = selected ? [selected, ...resolved.filter((source) => source.url !== selected.url)] : resolved;
-    return <PlayerV2 channel={{ ...channel, url: sources[0].url, referer: sources[0].referer, origin: sources[0].origin, sources }} />;
+  if (resolved.length > 0) {
+    return <PlayerV2 channel={{ ...channel, url: resolved[0].url, referer: resolved[0].referer, origin: resolved[0].origin, sources: resolved }} />;
   }
 
   return (
     <div className={styles.embedPlayer}>
-      <div className={styles.probing}>
-        {resolutionError || 'برای این شبکه مسیر مستقیم قابل پخش پیدا نشد.'}
-      </div>
+      <div className={styles.probing}>{resolutionError || 'برای این شبکه مسیر قابل پخش پیدا نشد.'}</div>
     </div>
   );
 }
