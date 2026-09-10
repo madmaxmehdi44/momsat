@@ -9,6 +9,7 @@ type HlsInstance = { destroy: () => void; loadSource: (url: string) => void; att
 type HlsCtor = { new (config?: Record<string, unknown>): HlsInstance; isSupported: () => boolean; Events: Record<string, string> };
 
 function usable(url: string) { return /^https?:\/\//i.test(url.trim()); }
+function isNativeMedia(url: string) { return /\.(?:mp4|webm|m4v)(?:$|[?#])/i.test(url.trim()); }
 function proxied(source: Source) {
   const qs = new URLSearchParams({ url: source.url.trim() });
   if (source.referer) qs.set('referer', source.referer);
@@ -19,7 +20,8 @@ function score(source: Source, index: number) {
   const u = source.url.toLowerCase();
   let value = 0;
   if (/\.m3u8(?:$|[?#])/.test(u)) value += 100;
-  if (u.includes('playlist') || u.includes('stream')) value += 10;
+  if (isNativeMedia(u)) value += 80;
+  if (u.includes('playlist') || u.includes('stream') || u.includes('manifest')) value += 10;
   if (!source.vip) value += 2;
   return value - index / 1000;
 }
@@ -145,6 +147,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
 
     const source = sources[sourceIndex] ?? sources[0];
     const url = proxied(source);
+    const nativeMedia = isNativeMedia(source.url);
     const applyState = () => {
       video.volume = volumeRef.current;
       video.muted = mutedRef.current;
@@ -210,6 +213,13 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
 
     (async () => {
       try {
+        if (nativeMedia) {
+          applyState();
+          video.src = url;
+          video.load();
+          return;
+        }
+
         const mod = await import('hls.js');
         if (cancelled) return;
         const Hls = mod.default as unknown as HlsCtor;
@@ -307,7 +317,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
         hls.loadSource(url);
         hls.attachMedia(video);
       } catch {
-        if (!cancelled) failover('راه‌اندازی HLS ناموفق بود.');
+        if (!cancelled) failover(nativeMedia ? 'راه‌اندازی رسانه ناموفق بود.' : 'راه‌اندازی HLS ناموفق بود.');
       }
     })();
 
