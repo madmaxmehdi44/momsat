@@ -1,4 +1,6 @@
-import { importTable as importLegacy, parseCsv as parseLegacy, type CsvTable } from './table-csv-import';
+import { importTable as importLegacy, parseCsv as parseLegacy, type CsvTable as LegacyCsvTable } from './table-csv-import';
+
+export type CsvTable = LegacyCsvTable;
 
 type Row = Record<string, string>;
 
