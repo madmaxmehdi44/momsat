@@ -5,7 +5,7 @@ const THUMBNAILS: Array<{ test: RegExp; url: string }> = [
   },
   {
     test: /mbc\s*persia|ام\s*بی\s*سی\s*پرشیا/i,
-    url: 'https://www.sedaye-iran.online/assets/images/emblems/tv/mbc-persia-tv.webp',
+    url: 'https://www.persianity.com/thumb.php?h=506&src=https%3A%2F%2Fwww.irtv.website%2Findex_files%2Fchannels%2Fmbcpersia.png&w=900',
   },
   {
     test: /^pmc$|persian\s*music\s*channel|پی\s*ام\s*سی/i,
@@ -13,11 +13,11 @@ const THUMBNAILS: Array<{ test: RegExp; url: string }> = [
   },
   {
     test: /gem\s*series|gemseries|جم\s*سریال/i,
-    url: 'https://www.gemgroup.tv/assets/images/channels/icon_32.png',
+    url: 'https://www.persianity.com/thumb.php?h=506&src=https%3A%2F%2Fwww.irtv.website%2Findex_files%2Fchannels%2Fgemseries.png&w=900',
   },
   {
     test: /^gem\s*tv$|gemtv|جم\s*تی\s*وی/i,
-    url: 'https://commons.wikimedia.org/wiki/Special:FilePath/Gem_TV_logo_2020.png',
+    url: 'https://www.sedaye-iran.online/assets/images/emblems/tv/gem-tv.webp',
   },
 ];
 
