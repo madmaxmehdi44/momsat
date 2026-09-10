@@ -59,14 +59,7 @@ export type Channel = {
 };
 
 export type SourceAdapterStatus = 'ready' | 'disabled' | 'unconfigured' | 'failed';
-
-export type CatalogSourceResult = {
-  adapter: string;
-  status: SourceAdapterStatus;
-  channels: Channel[];
-  error?: string;
-};
-
+export type CatalogSourceResult = { adapter: string; status: SourceAdapterStatus; channels: Channel[]; error?: string };
 export type CatalogSourceAdapter = {
   id: string;
   name: string;
@@ -82,35 +75,158 @@ function envFlag(name: string, defaultValue: boolean) {
   return !['0', 'false', 'no', 'off'].includes(value);
 }
 
+function envInt(name: string, fallback: number, min = 1, max = 1000) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.floor(n))) : fallback;
+}
+
+function stableId(input: string) {
+  const digest = crypto.createHash('sha1').update(input).digest();
+  const value = digest.readUInt32BE(0) & 0x7fffffff;
+  return value === 0 ? 1 : value;
+}
+
+function decodeHtml(value: string) {
+  return value.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+
+function stripTags(value: string) {
+  return decodeHtml(value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim());
+}
+
+function absoluteUrl(value: string, base: string) {
+  try { return new URL(value, base).toString(); } catch { return null; }
+}
+
+function unique(values: string[]) { return Array.from(new Set(values.filter(Boolean))); }
+
+function mediaUrls(html: string, pageUrl: string) {
+  const found: string[] = [];
+  const patterns = [
+    /(?:src|data-src|data-url|file|source)=["']([^"']+)["']/gi,
+    /https?:\\?\/\\?\/[^"'\s<>]+\.(?:m3u8|mp4)(?:\?[^"'\s<>]*)?/gi,
+    /https?:\\?\/\\?\/[^"'\s<>]*(?:m3u8|playlist|stream)[^"'\s<>]*/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) {
+      const candidate = decodeHtml(match[1] ?? match[0]).replace(/\\\//g, '/');
+      const url = absoluteUrl(candidate, pageUrl);
+      if (url && /^(https?:|rtmp:)/i.test(url) && !/\.jpg|\.png|\.webp|\.gif/i.test(url)) found.push(url);
+    }
+  }
+  return unique(found).filter((url) => /m3u8|mp4|stream|playlist|embed/i.test(url));
+}
+
+function extractAnchors(html: string, pageUrl: string) {
+  const links: { href: string; text: string }[] = [];
+  const pattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  for (const match of html.matchAll(pattern)) {
+    const href = absoluteUrl(decodeHtml(match[1]), pageUrl);
+    const text = stripTags(match[2]);
+    if (href && text) links.push({ href, text });
+  }
+  return links;
+}
+
+function htmlImage(html: string, pageUrl: string) {
+  const match = html.match(/<img\b[^>]*(?:src|data-src)=["']([^"']+)["']/i);
+  return match ? absoluteUrl(decodeHtml(match[1]), pageUrl) : null;
+}
+
+async function fetchText(url: string) {
+  const response = await fetch(url, {
+    cache: 'no-store',
+    headers: { 'user-agent': process.env.SOURCE_HTTP_USER_AGENT || 'MomSatCatalog/1.0' },
+    signal: AbortSignal.timeout(envInt('SOURCE_FETCH_TIMEOUT_MS', 15000, 2000, 60000)),
+  });
+  if (!response.ok) throw new Error(`${response.status} from ${url}`);
+  return response.text();
+}
+
+function categoryFromName(name: string) {
+  const value = name.toLowerCase();
+  if (/sport|varzesh|ورزش|football|soccer/.test(value)) return ['Sport', 'sport'];
+  if (/news|khabar|خبر/.test(value)) return ['News', 'news'];
+  if (/music|moz|موزیک|موسیقی/.test(value)) return ['Music', 'music'];
+  if (/radio|رادیو/.test(value)) return ['Radio', 'radio'];
+  if (/movie|film|فیلم|سینما|cinema/.test(value)) return ['Movies', 'movies'];
+  return ['Persian TV', 'persian-tv'];
+}
+
+function siteChannel(name: string, pageUrl: string, streamUrls: string[], image: string | null, adapterId: string): Channel {
+  const [category, categoryEn] = categoryFromName(name);
+  const stream = streamUrls[0] ?? pageUrl;
+  const sources = streamUrls.map((url, index) => ({
+    id: stableId(`${adapterId}:source:${url}`),
+    title: `${name} source ${index + 1}`,
+    url,
+    referer: pageUrl,
+    origin: new URL(pageUrl).origin,
+    country: null,
+    vip: false,
+  }));
+  return {
+    id: stableId(`${adapterId}:channel:${pageUrl}`),
+    catId: stableId(`${adapterId}:category:${categoryEn}`),
+    name,
+    nameEn: name,
+    image,
+    url: stream,
+    referer: pageUrl,
+    origin: new URL(pageUrl).origin,
+    vpn: false,
+    iran: true,
+    popular: 0,
+    vip: false,
+    category,
+    categoryEn,
+    sources,
+  };
+}
+
+async function discoverSite(indexUrl: string, adapterId: string, pathPattern: RegExp) {
+  const indexHtml = await fetchText(indexUrl);
+  const anchors = extractAnchors(indexHtml, indexUrl);
+  const candidates = Array.from(new Map(
+    anchors
+      .filter((link) => pathPattern.test(link.href) && link.href !== indexUrl)
+      .map((link) => [link.href, link]),
+  ).values()).slice(0, envInt('SOURCE_SITE_MAX_CHANNELS', 250, 1, 1000));
+
+  const results: Channel[] = [];
+  const concurrency = envInt('SOURCE_SITE_CONCURRENCY', 6, 1, 20);
+  for (let i = 0; i < candidates.length; i += concurrency) {
+    const batch = candidates.slice(i, i + concurrency);
+    const discovered = await Promise.all(batch.map(async (candidate) => {
+      try {
+        const html = await fetchText(candidate.href);
+        const streams = mediaUrls(html, candidate.href);
+        if (!streams.length) return null;
+        return siteChannel(candidate.text, candidate.href, streams, htmlImage(html, candidate.href), adapterId);
+      } catch {
+        return null;
+      }
+    }));
+    results.push(...discovered.filter((item): item is Channel => Boolean(item)));
+  }
+  return results;
+}
+
 function decryptPayload(text: string) {
   const keyHex = process.env.SOURCE_AES_KEY_HEX?.trim() ?? '';
   const ivHex = process.env.SOURCE_AES_IV_HEX?.trim() ?? '';
-
-  if (!keyHex || !ivHex) {
-    throw new Error('mytvsat encrypted source is not configured: SOURCE_AES_KEY_HEX / SOURCE_AES_IV_HEX are missing');
-  }
-
+  if (!keyHex || !ivHex) throw new Error('mytvsat encrypted source credentials are missing');
   const key = Buffer.from(keyHex, 'hex');
   const iv = Buffer.from(ivHex, 'hex');
-
-  if (key.length !== 32 || iv.length !== 16) {
-    throw new Error('mytvsat encrypted source has invalid AES configuration: key must be 32 bytes and IV must be 16 bytes');
-  }
-
-  const input = Buffer.from(text.trim(), 'base64');
+  if (key.length !== 32 || iv.length !== 16) throw new Error('mytvsat AES key must be 32 bytes and IV 16 bytes');
   const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-  let output = Buffer.concat([decipher.update(input), decipher.final()]);
-
-  if (output[0] === 0x1f && output[1] === 0x8b) {
-    output = gunzipSync(output);
-  }
-
+  let output = Buffer.concat([decipher.update(Buffer.from(text.trim(), 'base64')), decipher.final()]);
+  if (output[0] === 0x1f && output[1] === 0x8b) output = gunzipSync(output);
   return JSON.parse(output.toString('utf8')) as { posts?: RawPost[] } | RawPost[];
 }
 
 function normalizePosts(body: { posts?: RawPost[] } | RawPost[]) {
   const posts = Array.isArray(body) ? body : body.posts ?? [];
-
   return posts.map((post): Channel => ({
     id: post.channel_id,
     catId: post.category_id,
@@ -138,75 +254,136 @@ function normalizePosts(body: { posts?: RawPost[] } | RawPost[]) {
   }));
 }
 
+function parseM3u(text: string, adapterId: string) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const channels: Channel[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('#EXTINF')) continue;
+    const info = lines[i];
+    const url = lines[i + 1] && !lines[i + 1].startsWith('#') ? lines[i + 1] : '';
+    if (!url || !/^https?:\/\//i.test(url)) continue;
+    const name = info.split(',').slice(1).join(',').trim() || 'Unknown Channel';
+    const group = info.match(/group-title=["']([^"']*)["']/i)?.[1] || 'Imported TV';
+    const logo = info.match(/tvg-logo=["']([^"']*)["']/i)?.[1] || null;
+    channels.push({
+      id: stableId(`${adapterId}:${url}`),
+      catId: stableId(`${adapterId}:group:${group}`),
+      name,
+      nameEn: name,
+      image: logo,
+      url,
+      referer: null,
+      origin: null,
+      vpn: false,
+      iran: true,
+      popular: 0,
+      vip: false,
+      category: group,
+      categoryEn: group,
+      sources: [{ id: stableId(`${adapterId}:source:${url}`), title: 'M3U', url, referer: null, origin: null, country: null, vip: false }],
+    });
+    i++;
+  }
+  return channels;
+}
+
 const myTvSatAdapter: CatalogSourceAdapter = {
-  id: 'mytvsat-encrypted',
-  name: 'mytvsat encrypted feed',
-  optional: true,
-  isEnabled: () => envFlag('SOURCE_ENCRYPTED_ENABLED', true),
-  isConfigured: () => Boolean(
-    process.env.SOURCE_ENCRYPTED_URL?.trim() &&
-    process.env.SOURCE_AES_KEY_HEX?.trim() &&
-    process.env.SOURCE_AES_IV_HEX?.trim(),
-  ),
+  id: 'mytvsat-encrypted', name: 'mytvsat encrypted feed', optional: true,
+  isEnabled: () => envFlag('SOURCE_ENCRYPTED_ENABLED', false),
+  isConfigured: () => Boolean(process.env.SOURCE_ENCRYPTED_URL?.trim() && process.env.SOURCE_AES_KEY_HEX?.trim() && process.env.SOURCE_AES_IV_HEX?.trim()),
   async fetch() {
     const url = process.env.SOURCE_ENCRYPTED_URL?.trim();
     if (!url) throw new Error('SOURCE_ENCRYPTED_URL is missing');
-
     const response = await fetch(url, { cache: 'no-store' });
     if (!response.ok) throw new Error(`source returned ${response.status}`);
-
     return normalizePosts(decryptPayload(await response.text()));
   },
 };
 
-export const catalogSourceAdapters: CatalogSourceAdapter[] = [myTvSatAdapter];
+const parsaTvAdapter: CatalogSourceAdapter = {
+  id: 'parsatv-public', name: 'ParsaTV public directory', optional: true,
+  isEnabled: () => envFlag('SOURCE_PARSATV_ENABLED', true),
+  isConfigured: () => Boolean(process.env.SOURCE_PARSATV_INDEX_URL?.trim()),
+  async fetch() {
+    return discoverSite(process.env.SOURCE_PARSATV_INDEX_URL!.trim(), 'parsatv', /parsatv\.com\/name=/i);
+  },
+};
+
+const persianTvLiveAdapter: CatalogSourceAdapter = {
+  id: 'persiantvlive-public', name: 'PersianTVLive public directory', optional: true,
+  isEnabled: () => envFlag('SOURCE_PERSIANTVLIVE_ENABLED', true),
+  isConfigured: () => Boolean(process.env.SOURCE_PERSIANTVLIVE_INDEX_URL?.trim()),
+  async fetch() {
+    return discoverSite(process.env.SOURCE_PERSIANTVLIVE_INDEX_URL!.trim(), 'persiantvlive', /persiantvlive\.com\//i);
+  },
+};
+
+const pakhshZendeAdapter: CatalogSourceAdapter = {
+  id: 'pakhshzende-public', name: 'PakhshZende public directory', optional: true,
+  isEnabled: () => envFlag('SOURCE_PAKHSHZENDE_ENABLED', true),
+  isConfigured: () => Boolean(process.env.SOURCE_PAKHSHZENDE_INDEX_URL?.trim()),
+  async fetch() {
+    return discoverSite(process.env.SOURCE_PAKHSHZENDE_INDEX_URL!.trim(), 'pakhshzende', /pakhshzende\.com\/tv-channel\//i);
+  },
+};
+
+const m3uAdapter: CatalogSourceAdapter = {
+  id: 'm3u-import', name: 'M3U playlist importer', optional: true,
+  isEnabled: () => envFlag('SOURCE_M3U_ENABLED', true),
+  isConfigured: () => Boolean(process.env.SOURCE_M3U_URLS?.trim()),
+  async fetch() {
+    const urls = unique((process.env.SOURCE_M3U_URLS ?? '').split(/[\n,]/).map((v) => v.trim()));
+    const payloads = await Promise.all(urls.map((url) => fetchText(url)));
+    return payloads.flatMap((text) => parseM3u(text, 'm3u-import'));
+  },
+};
+
+const officialAdapter: CatalogSourceAdapter = {
+  id: 'official-feed', name: 'official broadcaster feed', optional: true,
+  isEnabled: () => envFlag('SOURCE_OFFICIAL_ENABLED', true),
+  isConfigured: () => Boolean(process.env.SOURCE_OFFICIAL_URLS?.trim()),
+  async fetch() {
+    const urls = unique((process.env.SOURCE_OFFICIAL_URLS ?? '').split(/[\n,]/).map((v) => v.trim()));
+    const payloads = await Promise.all(urls.map((url) => fetchText(url)));
+    return payloads.flatMap((text) => {
+      try {
+        const json = JSON.parse(text) as unknown;
+        if (Array.isArray(json)) return normalizePosts(json as RawPost[]);
+        if (json && typeof json === 'object' && 'posts' in json) return normalizePosts(json as { posts?: RawPost[] });
+      } catch { /* fall through to M3U */ }
+      return parseM3u(text, 'official-feed');
+    });
+  },
+};
+
+export const catalogSourceAdapters: CatalogSourceAdapter[] = [
+  myTvSatAdapter,
+  parsaTvAdapter,
+  persianTvLiveAdapter,
+  pakhshZendeAdapter,
+  m3uAdapter,
+  officialAdapter,
+];
 
 export async function fetchCatalogSources(): Promise<CatalogSourceResult[]> {
   const results: CatalogSourceResult[] = [];
-
   for (const adapter of catalogSourceAdapters) {
-    if (!adapter.isEnabled()) {
-      results.push({ adapter: adapter.id, status: 'disabled', channels: [] });
-      continue;
-    }
-
-    if (!adapter.isConfigured()) {
-      results.push({
-        adapter: adapter.id,
-        status: 'unconfigured',
-        channels: [],
-        error: 'Optional source credentials are not configured; source was skipped.',
-      });
-      continue;
-    }
-
+    if (!adapter.isEnabled()) { results.push({ adapter: adapter.id, status: 'disabled', channels: [] }); continue; }
+    if (!adapter.isConfigured()) { results.push({ adapter: adapter.id, status: 'unconfigured', channels: [], error: 'Optional source is not configured; source was skipped.' }); continue; }
     try {
       results.push({ adapter: adapter.id, status: 'ready', channels: await adapter.fetch() });
     } catch (error) {
-      results.push({
-        adapter: adapter.id,
-        status: 'failed',
-        channels: [],
-        error: error instanceof Error ? error.message : 'source fetch failed',
-      });
+      results.push({ adapter: adapter.id, status: 'failed', channels: [], error: error instanceof Error ? error.message : 'source fetch failed' });
     }
   }
-
   return results;
 }
 
-/** Backward-compatible single-catalog API. Optional sources that are not configured return an empty catalog. */
 export async function fetchCatalog(): Promise<Channel[]> {
   const results = await fetchCatalogSources();
   return results.flatMap((result) => result.channels);
 }
 
 export function categoriesOf(channels: Channel[]) {
-  return Array.from(
-    new Map(channels.map((channel) => [channel.catId, {
-      id: channel.catId,
-      name: channel.category,
-      nameEn: channel.categoryEn,
-    }])).values(),
-  ).filter((category) => category.id !== 0);
+  return Array.from(new Map(channels.map((channel) => [channel.catId, { id: channel.catId, name: channel.category, nameEn: channel.categoryEn }])).values()).filter((category) => category.id !== 0);
 }
