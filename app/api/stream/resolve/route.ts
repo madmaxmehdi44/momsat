@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { discoverMediaSources, isSafePublicUrl } from '../../../../lib/web-source-extractor';
+import { ttlGetOrSet } from '../../../../lib/ttl-cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const RESOLVE_TTL_MS = 60_000;
 
 export async function GET(request: NextRequest) {
   const target = request.nextUrl.searchParams.get('url')?.trim() ?? '';
@@ -10,7 +13,7 @@ export async function GET(request: NextRequest) {
   if (!(await isSafePublicUrl(target))) return NextResponse.json({ ok: false, error: 'Invalid or blocked URL' }, { status: 400 });
 
   try {
-    const result = await discoverMediaSources(target);
+    const result = await ttlGetOrSet(`momsat:resolve:v2:${target}`, RESOLVE_TTL_MS, () => discoverMediaSources(target));
     return NextResponse.json({
       ok: result.sources.length > 0,
       requestedUrl: result.requestedUrl,
@@ -19,7 +22,10 @@ export async function GET(request: NextRequest) {
       errors: result.errors,
     }, {
       status: 200,
-      headers: { 'cache-control': 'no-store', 'access-control-allow-origin': '*' },
+      headers: {
+        'cache-control': 'public, s-maxage=60, stale-while-revalidate=120',
+        'access-control-allow-origin': '*',
+      },
     });
   } catch (error) {
     return NextResponse.json({
