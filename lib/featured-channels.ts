@@ -48,6 +48,22 @@ const definitions: FeaturedDefinition[] = [
     ],
   },
   {
+    id: 'voa-persian', name: 'VOA Persian', nameEn: 'VOA Persian', category: 'News', categoryEn: 'news', country: 'US', platform: 'SATELLITE + INTERNET',
+    satellite: null, frequency: null, polarization: null, symbolRate: null,
+    sources: [
+      source('voa-persian:akamaized', 'Direct HLS', 'https://voa-ingest.akamaized.net/hls/live/2033876/tvmc07/playlist.m3u8', 'US'),
+    ],
+  },
+  {
+    id: 'bbc-persian', name: 'BBC Persian', nameEn: 'BBC Persian', category: 'News', categoryEn: 'news', country: 'UK', platform: 'SATELLITE + INTERNET',
+    satellite: null, frequency: null, polarization: null, symbolRate: null,
+    sources: [
+      source('bbc-persian:akamaized', 'Direct HLS HD', 'https://vs-hls-pushb-ww-live.akamaized.net/x=4/i=urn:bbc:pips:service:bbc_persian_tv/pc_hd_abr_v2.m3u8', 'UK'),
+      source('bbc-persian:bbci', 'BBC CDN fallback', 'https://vs-hls-pushb-ww.live.cf.md.bbci.co.uk/x=4/i=urn:bbc:pips:service:bbc_persian_tv/pc_hd_abr_v2.m3u8', 'UK'),
+      source('bbc-persian:mobile', 'Mobile HD fallback', 'https://vs-hls-pushb-ww-live.akamaized.net/x=4/i=urn:bbc:pips:service:bbc_persian_tv/mobile_wifi_main_hd_abr_v2.m3u8', 'UK'),
+    ],
+  },
+  {
     id: 'mbc-persia', name: 'MBC Persia', nameEn: 'MBC Persia', category: 'Movies & Series', categoryEn: 'movies-series', country: 'UAE', platform: 'SATELLITE + INTERNET',
     satellite: 'Eutelsat 7/8W family', frequency: null, polarization: null, symbolRate: null,
     sources: [
