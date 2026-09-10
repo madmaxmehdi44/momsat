@@ -30,6 +30,10 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const hlsRef = useRef<HlsInstance | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stallWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastProgressTimeRef = useRef(0);
+  const lastProgressWallClockRef = useRef(0);
+  const stallRecoveryRef = useRef(0);
   const networkRetryRef = useRef(0);
   const mediaRecoveryRef = useRef(false);
   const playingRef = useRef(false);
@@ -69,6 +73,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const clearTimers = useCallback(() => {
     if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
     if (hideControlsTimerRef.current) { clearTimeout(hideControlsTimerRef.current); hideControlsTimerRef.current = null; }
+    if (stallWatchdogRef.current) { clearInterval(stallWatchdogRef.current); stallWatchdogRef.current = null; }
   }, []);
 
   const destroy = useCallback(() => {
@@ -93,6 +98,9 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     setQuality(-1);
     networkRetryRef.current = 0;
     mediaRecoveryRef.current = false;
+    stallRecoveryRef.current = 0;
+    lastProgressTimeRef.current = 0;
+    lastProgressWallClockRef.current = Date.now();
     revealControls(false);
   }, [revealControls, sources.length]);
 
@@ -102,6 +110,8 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     try {
       await video.play();
       setPlaying(true);
+      lastProgressTimeRef.current = video.currentTime || 0;
+      lastProgressWallClockRef.current = Date.now();
       revealControls(true);
     } catch {
       setControlsVisible(true);
@@ -129,6 +139,9 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     destroy();
     networkRetryRef.current = 0;
     mediaRecoveryRef.current = false;
+    stallRecoveryRef.current = 0;
+    lastProgressTimeRef.current = 0;
+    lastProgressWallClockRef.current = Date.now();
 
     const source = sources[sourceIndex] ?? sources[0];
     const url = proxied(source);
@@ -141,7 +154,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
       if (cancelled) return;
       if (sourceIndex + 1 < sources.length) {
         setError(`${message} مسیر بعدی امتحان می‌شود…`);
-        retryTimerRef.current = setTimeout(() => { if (!cancelled) selectSource(sourceIndex + 1); }, 1200);
+        retryTimerRef.current = setTimeout(() => { if (!cancelled) selectSource(sourceIndex + 1); }, 900);
       } else {
         setLoading(false);
         setError(`${message} هیچ مسیر دیگری برای پخش باقی نمانده است.`);
@@ -150,13 +163,32 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     };
 
     const onPlaying = () => {
-      if (!cancelled) { setLoading(false); setPlaying(true); revealControls(true); }
+      if (!cancelled) {
+        setLoading(false);
+        setPlaying(true);
+        stallRecoveryRef.current = 0;
+        lastProgressTimeRef.current = video.currentTime || 0;
+        lastProgressWallClockRef.current = Date.now();
+        revealControls(true);
+      }
     };
     const onPause = () => {
       if (!cancelled && !video.ended) { setPlaying(false); setControlsVisible(true); }
     };
     const onWaiting = () => {
-      if (!cancelled && !video.paused) setLoading(true);
+      if (!cancelled && !video.paused) {
+        setLoading(true);
+        lastProgressWallClockRef.current = Date.now();
+      }
+    };
+    const onTimeUpdate = () => {
+      if (cancelled || video.paused) return;
+      const currentTime = video.currentTime || 0;
+      if (currentTime !== lastProgressTimeRef.current) {
+        lastProgressTimeRef.current = currentTime;
+        lastProgressWallClockRef.current = Date.now();
+        stallRecoveryRef.current = 0;
+      }
     };
     const onLoadedMetadata = () => {
       if (cancelled) return;
@@ -172,6 +204,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     video.addEventListener('playing', onPlaying);
     video.addEventListener('pause', onPause);
     video.addEventListener('waiting', onWaiting);
+    video.addEventListener('timeupdate', onTimeUpdate);
     video.addEventListener('loadedmetadata', onLoadedMetadata);
     video.addEventListener('error', onVideoError);
 
@@ -235,16 +268,40 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
           if (data.type === 'mediaError' && !mediaRecoveryRef.current) {
             mediaRecoveryRef.current = true;
             hls.recoverMediaError();
+            lastProgressWallClockRef.current = Date.now();
             return;
           }
           if (data.type === 'networkError' && networkRetryRef.current < 4) {
             networkRetryRef.current += 1;
             setError(`اتصال ناپایدار است؛ تلاش مجدد ${networkRetryRef.current} از 4…`);
             hls.startLoad(-1);
+            lastProgressWallClockRef.current = Date.now();
             return;
           }
           failover(data.type === 'networkError' ? 'خطای شبکه در منبع فعلی.' : 'خطای HLS در منبع فعلی.');
         });
+
+        stallWatchdogRef.current = setInterval(() => {
+          if (cancelled || hlsRef.current !== hls || video.paused || video.ended) return;
+          const stalledFor = Date.now() - lastProgressWallClockRef.current;
+          if (stalledFor < 8500) return;
+
+          const recoveryAttempt = stallRecoveryRef.current;
+          stallRecoveryRef.current += 1;
+          lastProgressWallClockRef.current = Date.now();
+
+          if (recoveryAttempt === 0) {
+            setError('پخش گیر کرده؛ در حال بازیابی اتصال…');
+            hls.startLoad(-1);
+            return;
+          }
+          if (recoveryAttempt === 1) {
+            setError('پخش همچنان متوقف است؛ موتور رسانه در حال بازیابی است…');
+            hls.recoverMediaError();
+            return;
+          }
+          failover('استریم متوقف شده است.');
+        }, 2000);
 
         applyState();
         hls.loadSource(url);
@@ -262,6 +319,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('pause', onPause);
       video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('timeupdate', onTimeUpdate);
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('error', onVideoError);
     };
@@ -298,7 +356,6 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   }, []);
 
   const resetToCurrentSource = useCallback(() => selectSource(sourceIndex), [selectSource, sourceIndex]);
-  const currentSource = sources[sourceIndex] ?? sources[0];
 
   return (
     <div
