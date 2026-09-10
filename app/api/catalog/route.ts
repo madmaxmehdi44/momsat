@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { mergeFeaturedChannels } from '../../../lib/featured-channels';
 import { categoriesOf, fetchCatalog, type Channel } from '../../../lib/source';
 
 export const dynamic = 'force-dynamic';
@@ -36,9 +37,10 @@ async function refreshCatalog() {
 
   catalogCache.refreshing = fetchCatalog()
     .then((channels) => {
-      catalogCache.channels = channels;
+      const merged = mergeFeaturedChannels(channels);
+      catalogCache.channels = merged;
       catalogCache.expiresAt = Date.now() + catalogTtlMs();
-      return channels;
+      return merged;
     })
     .finally(() => {
       catalogCache.refreshing = null;
@@ -69,7 +71,6 @@ export async function GET() {
       );
     }
 
-    // After TTL expiry, serve stale data immediately and refresh in the background.
     if (catalogCache.channels.length) {
       void refreshCatalog();
       return NextResponse.json(
@@ -90,7 +91,6 @@ export async function GET() {
       );
     }
 
-    // First request still performs discovery, but concurrent callers share one fetch.
     const channels = await refreshCatalog();
     return NextResponse.json(
       {
