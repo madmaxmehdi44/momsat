@@ -1,0 +1,3 @@
+import {NextResponse} from 'next/server';import {fetchCatalog,categoriesOf} from '../../../lib/source';
+export const dynamic='force-dynamic';
+export async function GET(){try{const channels=await fetchCatalog();return NextResponse.json({ok:true,source:'v2/posts',count:channels.length,categories:categoriesOf(channels),channels})}catch(e:any){return NextResponse.json({ok:false,error:e?.message||'catalog fetch failed'},{status:500})}}
