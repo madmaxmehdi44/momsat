@@ -30,14 +30,18 @@ const DB_NAME = 'momsat-local';
 const DB_VERSION = 1;
 const USER_KEY = 'local-user';
 
+type StoredUser = {
+  id: string;
+  userId: string;
+  createdAt: number;
+};
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('users')) {
-        db.createObjectStore('users', { keyPath: 'id' });
-      }
+      if (!db.objectStoreNames.contains('users')) db.createObjectStore('users', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('sessions')) {
         const store = db.createObjectStore('sessions', { keyPath: 'id' });
         store.createIndex('userId', 'userId', { unique: false });
@@ -52,16 +56,16 @@ function openDb(): Promise<IDBDatabase> {
 export async function getLocalPlayerUser(): Promise<LocalPlayerUser> {
   const db = await openDb();
   try {
-    const existing = await new Promise<LocalPlayerUser | undefined>((resolve, reject) => {
+    const existing = await new Promise<StoredUser | undefined>((resolve, reject) => {
       const request = db.transaction('users', 'readonly').objectStore('users').get(USER_KEY);
-      request.onsuccess = () => resolve(request.result as LocalPlayerUser | undefined);
+      request.onsuccess = () => resolve(request.result as StoredUser | undefined);
       request.onerror = () => reject(request.error);
     });
-    if (existing) return existing;
+    if (existing?.userId) return { id: existing.userId, createdAt: existing.createdAt };
 
     const user: LocalPlayerUser = { id: crypto.randomUUID(), createdAt: Date.now() };
     await new Promise<void>((resolve, reject) => {
-      const request = db.transaction('users', 'readwrite').objectStore('users').add({ ...user, id: USER_KEY });
+      const request = db.transaction('users', 'readwrite').objectStore('users').put({ id: USER_KEY, userId: user.id, createdAt: user.createdAt } satisfies StoredUser);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
