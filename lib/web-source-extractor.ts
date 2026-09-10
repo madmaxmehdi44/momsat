@@ -45,17 +45,11 @@ function isPrivateIp(value: string) {
 
 export async function isSafePublicUrl(raw: string) {
   let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return false;
-  }
+  try { parsed = new URL(raw); } catch { return false; }
   if (!/^https?:$/i.test(parsed.protocol)) return false;
-
   const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!hostname || hostname.endsWith('.local') || PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(hostname))) return false;
   if (net.isIP(hostname)) return !isPrivateIp(hostname);
-
   try {
     const records = await dns.lookup(hostname, { all: true });
     return records.length > 0 && records.every((record) => !isPrivateIp(record.address));
@@ -84,27 +78,30 @@ function absoluteUrl(value: string, base: string) {
   try {
     const url = new URL(cleaned, base);
     return /^https?:$/i.test(url.protocol) ? url.toString() : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function looksLikeMediaUrl(value: string) {
   const url = value.toLowerCase();
-  return /(?:\.m3u8(?:$|[?#])|\.mp4(?:$|[?#])|\.webm(?:$|[?#])|\.m4v(?:$|[?#])|\/playlist(?:[/?#]|$)|\/manifest(?:[/?#]|$)|\/stream(?:[/?#]|$)|[?&](?:file|source|src|stream|playlist|manifest)=)/i.test(url);
+  return (
+    /\.m3u8(?:$|[?#])/i.test(url) ||
+    /\.(?:mp4|webm|m4v)(?:$|[?#])/i.test(url) ||
+    /\/(?:playlist|manifest|stream)(?:[\/?#]|$)/i.test(url) ||
+    /[?&](?:file|source|src|stream|playlist|manifest)=/i.test(url)
+  );
 }
 
 function extractAttributeValues(html: string, attribute: string) {
   const values: string[] = [];
-  const pattern = new RegExp(`${attribute}\\s*=\\s*(["'])(.*?)\\1`, 'gis');
+  const pattern = new RegExp(attribute + "\\s*=\\s*([\\\"'])(.*?)\\1", 'gis');
   for (const match of html.matchAll(pattern)) values.push(match[2]);
   return values;
 }
 
 function extractUrlLiterals(html: string) {
   const values: string[] = [];
-  const patterns = [
-    /https?:\/\/[^"'`\s<>]+/gi,
+  const patterns: RegExp[] = [
+    /https?:\/\/[^\"'\s<>]+/gi,
     /(?:file|src|source|url|streamUrl|playlist|manifest|hls|dash|media)\s*[:=]\s*["'`]([^"'`\s]+)["'`]/gi,
   ];
   for (const pattern of patterns) {
