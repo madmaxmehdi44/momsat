@@ -169,17 +169,22 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     ? `/api/channel-thumbnail?url=${encodeURIComponent(channel.image)}&name=${encodeURIComponent(channel.name || 'TV')}`
     : null;
 
-  if (verifying && !verified.length) {
-    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال بررسی سلامت مسیرهای پخش…</div></div>;
+  // Source probing is advisory. Do not block the player while it runs or if every probe is inconclusive.
+  if (directCandidates.length > 0) {
+    const orderedSources = verified.length > 0
+      ? [...verified, ...directCandidates.filter((source) => !verified.some((item) => item.url === source.url))]
+      : directCandidates;
+    const primary = orderedSources[0];
+    return <PlayerV2 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} />;
+  }
+
+  if (resolving) {
+    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
   }
 
   if (verified.length > 0) {
     const primary = verified[0];
     return <PlayerV2 channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: verified }} />;
-  }
-
-  if (resolving) {
-    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
   }
 
   return (
