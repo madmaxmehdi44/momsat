@@ -104,10 +104,8 @@ function extractAttributeValues(html: string, attribute: string) {
 function extractUrlLiterals(html: string) {
   const values: string[] = [];
   const patterns = [
-    /https?:\\/\\/[^\"'\s<>\\]+/gi,
-    /(?:file|src|source|url|streamUrl|playlist|manifest)\\s*[:=]\\s*["'`]([^"'`\s]+)["'`]/gi,
-    /(?:hls|dash|media|playlist)\\s*[:=]\\s*["'`]([^"'`\s]+)["'`]/gi,
-    /(?:https?:)?\\/\\/[^\"'\s<>\\]+/gi,
+    /https?:\/\/[^"'`\s<>]+/gi,
+    /(?:file|src|source|url|streamUrl|playlist|manifest|hls|dash|media)\s*[:=]\s*["'`]([^"'`\s]+)["'`]/gi,
   ];
   for (const pattern of patterns) {
     for (const match of html.matchAll(pattern)) values.push(match[1] ?? match[0]);
@@ -120,12 +118,8 @@ function extractPageCandidates(html: string, pageUrl: string) {
   for (const attribute of ['src', 'data-src', 'data-url', 'data-file', 'data-stream', 'data-playlist', 'data-hls']) {
     for (const value of extractAttributeValues(html, attribute)) {
       const absolute = absoluteUrl(value, pageUrl);
-      if (absolute && !looksLikeMediaUrl(absolute)) candidates.add(absolute);
+      if (absolute && /(?:iframe|player|embed|video|live)/i.test(absolute) && !looksLikeMediaUrl(absolute)) candidates.add(absolute);
     }
-  }
-  for (const value of extractAttributeValues(html, 'src')) {
-    const absolute = absoluteUrl(value, pageUrl);
-    if (absolute && /\/iframe|player|embed|video/i.test(absolute) && !looksLikeMediaUrl(absolute)) candidates.add(absolute);
   }
   return Array.from(candidates);
 }
@@ -142,7 +136,6 @@ function extractMediaCandidates(html: string, pageUrl: string) {
     ...extractAttributeValues(html, 'data-hls'),
     ...extractAttributeValues(html, 'file'),
     ...extractAttributeValues(html, 'source'),
-    ...extractAttributeValues(html, 'content'),
     ...extractUrlLiterals(html),
   ];
 
