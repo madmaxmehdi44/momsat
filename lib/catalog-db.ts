@@ -1,5 +1,5 @@
 import { prisma } from './prisma';
-import { featuredChannels, mergeFeaturedChannels } from './featured-channels';
+import { mergeFeaturedChannels } from './featured-channels';
 import { fetchCatalog, categoriesOf, Channel } from './source';
 
 export type { Channel };
