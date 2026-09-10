@@ -94,7 +94,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     }
 
     if (selected) {
-      const remaining = candidates.filter((source) => source.url !== selected.url);
+      const remaining = directCandidates.filter((source) => source.url !== selected.url);
       return <PlayerV2 channel={{ ...channel, url: selected.url, referer: selected.referer, origin: selected.origin, sources: [selected, ...remaining] }} />;
     }
   }
