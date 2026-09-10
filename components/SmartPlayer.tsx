@@ -1,6 +1,7 @@
 'use client';
 
 import PlayerV2 from './PlayerV2';
+import styles from './SmartPlayer.module.css';
 
 type Source = {
   url: string;
@@ -46,7 +47,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
   if (!embed) return <PlayerV2 channel={channel} />;
 
   return (
-    <div className="embed-player">
+    <div className={styles.embedPlayer}>
       <iframe
         title={channel.name || 'MOMSAT live player'}
         src={embed.url}
@@ -55,7 +56,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
         allowFullScreen
         referrerPolicy="strict-origin-when-cross-origin"
       />
-      <div className="embed-player-badge">External player</div>
+      <div className={styles.badge}>External player</div>
     </div>
   );
 }
