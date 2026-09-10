@@ -108,6 +108,13 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     }
   }, [revealControls]);
 
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) void play();
+    else video.pause();
+  }, [play]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !sources.length) {
@@ -159,7 +166,6 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     };
     const onVideoError = () => failover('خطای ویدئو در منبع فعلی.');
 
-    // Reset before attaching failure listeners so the initial empty-src load is never treated as a stream failure.
     video.pause();
     video.removeAttribute('src');
     video.load();
