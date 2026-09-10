@@ -29,17 +29,14 @@ type Probe = {
   latencyMs?: number;
 };
 
-function isDirectMedia(url: string) {
-  return /\.(?:m3u8|mp4|webm|m4v)(?:$|\?)/i.test(url) || /(?:\/|[?&])(m3u8|playlist|manifest|stream)(?:[/?=&]|$)/i.test(url);
-}
+type ResolvedSource = Source & {
+  discoveredFrom?: string;
+  depth?: number;
+};
 
-function isEmbeddablePage(url: string) {
-  try {
-    const parsed = new URL(url);
-    return /^https?:$/.test(parsed.protocol);
-  } catch {
-    return false;
-  }
+function isDirectMedia(url: string) {
+  return /\.(?:m3u8|mp4|webm|m4v)(?:$|[?#])/i.test(url)
+    || /(?:\/|[?&])(m3u8|playlist|manifest|stream)(?:[/?=&]|$)/i.test(url);
 }
 
 function uniqueCandidates(channel: Channel) {
@@ -51,15 +48,41 @@ function uniqueCandidates(channel: Channel) {
   return Array.from(new Map(candidates.map((source) => [source.url.trim(), source])).values());
 }
 
+async function probeSources(sources: Source[]) {
+  const results = await Promise.all(sources.map(async (source, index) => {
+    try {
+      const params = new URLSearchParams({ url: source.url });
+      if (source.referer) params.set('referer', source.referer);
+      if (source.origin) params.set('origin', source.origin);
+      const response = await fetch(`/api/stream/probe?${params.toString()}`, { cache: 'no-store' });
+      const probe = response.ok ? await response.json() as Probe : null;
+      return { source, probe, index };
+    } catch {
+      return { source, probe: null, index };
+    }
+  }));
+
+  return results
+    .filter((item) => item.probe?.playable)
+    .sort((a, b) => (a.probe?.latencyMs ?? Number.MAX_SAFE_INTEGER) - (b.probe?.latencyMs ?? Number.MAX_SAFE_INTEGER) || a.index - b.index)
+    .map((item) => item.source);
+}
+
 export default function SmartPlayer({ channel }: { channel: Channel }) {
   const candidates = useMemo(() => uniqueCandidates(channel), [channel]);
   const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
-  const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url) && isEmbeddablePage(source.url)), [candidates]);
+  const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url)), [candidates]);
   const [selected, setSelected] = useState<Source | null>(null);
+  const [resolved, setResolved] = useState<ResolvedSource[]>([]);
   const [probing, setProbing] = useState(directCandidates.length > 0);
+  const [resolving, setResolving] = useState(false);
+  const [resolutionError, setResolutionError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
+    setResolved([]);
+    setResolutionError('');
+
     if (!directCandidates.length) {
       setSelected(null);
       setProbing(false);
@@ -69,30 +92,56 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     setProbing(true);
     setSelected(null);
 
-    void Promise.all(
-      directCandidates.map(async (source, index) => {
-        try {
-          const params = new URLSearchParams({ url: source.url });
-          if (source.referer) params.set('referer', source.referer);
-          if (source.origin) params.set('origin', source.origin);
-          const response = await fetch(`/api/stream/probe?${params.toString()}`, { cache: 'no-store' });
-          const probe = response.ok ? (await response.json() as Probe) : null;
-          return { source, probe, index };
-        } catch {
-          return { source, probe: null, index };
-        }
-      }),
-    ).then((results) => {
+    void probeSources(directCandidates).then((playable) => {
       if (cancelled) return;
-      const playable = results
-        .filter((item) => item.probe?.playable)
-        .sort((a, b) => (a.probe?.latencyMs ?? Number.MAX_SAFE_INTEGER) - (b.probe?.latencyMs ?? Number.MAX_SAFE_INTEGER) || a.index - b.index);
-      setSelected(playable[0]?.source ?? null);
+      setSelected(playable[0] ?? null);
       setProbing(false);
     });
 
     return () => { cancelled = true; };
   }, [directCandidates]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (directCandidates.length > 0 || pageCandidates.length === 0) {
+      setResolving(false);
+      return () => { cancelled = true; };
+    }
+
+    setResolving(true);
+    setResolutionError('');
+
+    const queue = pageCandidates.slice(0, 4);
+    void Promise.all(queue.map(async (source) => {
+      try {
+        const params = new URLSearchParams({ url: source.url });
+        const response = await fetch(`/api/stream/resolve?${params.toString()}`, { cache: 'no-store' });
+        if (!response.ok) return [] as ResolvedSource[];
+        const body = await response.json() as { sources?: ResolvedSource[] };
+        return body.sources ?? [];
+      } catch {
+        return [] as ResolvedSource[];
+      }
+    })).then(async (groups) => {
+      if (cancelled) return;
+      const discovered = Array.from(new Map(groups.flat().map((source) => [source.url, source])).values());
+      const playable = await probeSources(discovered);
+      if (cancelled) return;
+      if (playable.length) {
+        setResolved(playable);
+        setSelected(playable[0]);
+      } else {
+        setResolutionError('از صفحه‌ی منبع، مسیر مستقیم قابل پخش پیدا نشد.');
+      }
+      setResolving(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setResolutionError('استخراج منبع پخش ناموفق بود.');
+      setResolving(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [directCandidates.length, pageCandidates]);
 
   if (directCandidates.length > 0) {
     if (probing) {
@@ -104,23 +153,23 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       return <PlayerV2 channel={{ ...channel, url: selected.url, referer: selected.referer, origin: selected.origin, sources: [selected, ...remaining] }} />;
     }
 
-    if (!pageCandidates.length) return <PlayerV2 channel={{ ...channel, sources: directCandidates }} />;
+    return <PlayerV2 channel={{ ...channel, sources: directCandidates }} />;
   }
 
-  const embed = pageCandidates[0];
-  if (!embed) return <PlayerV2 channel={channel} />;
+  if (resolving) {
+    return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج منبع واقعی پخش از سرویس‌دهنده…</div></div>;
+  }
+
+  if (selected || resolved.length > 0) {
+    const sources = selected ? [selected, ...resolved.filter((source) => source.url !== selected.url)] : resolved;
+    return <PlayerV2 channel={{ ...channel, url: sources[0].url, referer: sources[0].referer, origin: sources[0].origin, sources }} />;
+  }
 
   return (
     <div className={styles.embedPlayer}>
-      <iframe
-        title={channel.name || 'MOMSAT live player'}
-        src={embed.url}
-        loading="eager"
-        allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-        allowFullScreen
-        referrerPolicy="strict-origin-when-cross-origin"
-      />
-      <div className={styles.badge}>External player</div>
+      <div className={styles.probing}>
+        {resolutionError || 'برای این شبکه مسیر مستقیم قابل پخش پیدا نشد.'}
+      </div>
     </div>
   );
 }
