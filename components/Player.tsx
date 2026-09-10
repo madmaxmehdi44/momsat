@@ -3,22 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Maximize, Minimize, Pause, PictureInPicture2, Play, RotateCcw, Settings, Volume2, VolumeX } from 'lucide-react';
 
-type PlayerSource = {
-  url: string;
-  title?: string | null;
-  referer?: string | null;
-  origin?: string | null;
-};
-
-type PlayerChannel = {
-  name?: string;
-  image?: string | null;
-  url?: string | null;
-  referer?: string | null;
-  origin?: string | null;
-  sources?: PlayerSource[];
-};
-
+type PlayerSource = { url: string; title?: string | null; referer?: string | null; origin?: string | null };
+type PlayerChannel = { name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: PlayerSource[] };
 type HlsLike = {
   destroy: () => void;
   loadSource: (url: string) => void;
@@ -29,19 +15,9 @@ type HlsLike = {
   levels: Array<{ height?: number; bitrate?: number }>;
   on: (event: string, handler: (event: unknown, data: any) => void) => void;
 };
+type HlsModule = { default: { new (config?: Record<string, unknown>): HlsLike; isSupported: () => boolean; Events: Record<string, string> } };
 
-type HlsModule = {
-  default: {
-    new (config?: Record<string, unknown>): HlsLike;
-    isSupported: () => boolean;
-    Events: Record<string, string>;
-  };
-};
-
-function isUsableUrl(url: string) {
-  return /^https?:\/\//i.test(url.trim());
-}
-
+function isUsableUrl(url: string) { return /^https?:\/\//i.test(url.trim()); }
 function toProxyUrl(source: PlayerSource) {
   const params = new URLSearchParams({ url: source.url });
   if (source.referer) params.set('referer', source.referer);
@@ -70,10 +46,8 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
 
   const sources = useMemo<PlayerSource[]>(() => {
     const all: PlayerSource[] = [];
-    if (channel.url && isUsableUrl(channel.url)) all.push({ url: channel.url, title: 'Primary' , referer: channel.referer, origin: channel.origin });
-    for (const source of channel.sources ?? []) {
-      if (isUsableUrl(source.url)) all.push(source);
-    }
+    if (channel.url && isUsableUrl(channel.url)) all.push({ url: channel.url, title: 'Primary', referer: channel.referer, origin: channel.origin });
+    for (const source of channel.sources ?? []) if (isUsableUrl(source.url)) all.push(source);
     return Array.from(new Map(all.map((source) => [source.url, source])).values());
   }, [channel]);
 
@@ -111,8 +85,6 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
     const onLoaded = () => {
       if (cancelled) return;
       setLoading(false);
-      video.muted = muted;
-      video.volume = volume;
       video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
     };
     const onWaiting = () => !cancelled && setLoading(true);
@@ -124,8 +96,14 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
     const onPause = () => !cancelled && setPlaying(false);
     const onVideoError = () => {
       if (cancelled) return;
-      setLoading(false);
-      setError('این منبع قابل پخش نیست. در حال بررسی مسیر بعدی…');
+      failCountRef.current += 1;
+      if (sources.length > 1 && sourceIndex < sources.length - 1) {
+        setError('مسیر فعلی قابل پخش نیست؛ مسیر بعدی انتخاب می‌شود.');
+        window.setTimeout(() => { if (!cancelled) activateSource(sourceIndex + 1); }, 500);
+      } else {
+        setLoading(false);
+        setError('پخش این شبکه از مسیرهای موجود ممکن نشد.');
+      }
     };
 
     video.addEventListener('loadedmetadata', onLoaded);
@@ -147,6 +125,7 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
         }
 
         if (!Hls.default.isSupported()) {
+          setLoading(false);
           setError('مرورگر فعلی از پخش HLS پشتیبانی نمی‌کند.');
           return;
         }
@@ -165,14 +144,14 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
           capLevelToPlayerSize: true,
         });
         hlsRef.current = hls;
+
         hls.on(Hls.default.Events.MANIFEST_PARSED, () => {
           if (cancelled) return;
           setLevels(hls.levels.map((level, index) => ({ index, label: level.height ? `${level.height}p` : `${Math.round((level.bitrate ?? 0) / 1000)} kbps` }))));
           setLoading(false);
-          video.muted = muted;
-          video.volume = volume;
           video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
         });
+
         hls.on(Hls.default.Events.ERROR, (_event, data) => {
           if (cancelled || !data?.fatal) return;
           failCountRef.current += 1;
@@ -185,13 +164,14 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
             return;
           }
           if (sources.length > 1 && sourceIndex < sources.length - 1) {
-            setError('مسیر فعلی پاسخ نمی‌دهد؛ مسیر بعدی انتخاب شد.');
-            activateSource(sourceIndex + 1);
+            setError('مسیر فعلی پاسخ نمی‌دهد؛ مسیر بعدی انتخاب می‌شود.');
+            window.setTimeout(() => { if (!cancelled) activateSource(sourceIndex + 1); }, 500);
           } else {
             setLoading(false);
             setError('پخش این شبکه از مسیرهای موجود ممکن نشد.');
           }
         });
+
         hls.loadSource(proxySource);
         hls.attachMedia(video);
       } catch {
@@ -213,7 +193,7 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
       video.removeEventListener('error', onVideoError);
       destroyHls();
     };
-  }, [proxySource, destroyHls, muted, volume, sourceIndex, sources.length, activateSource]);
+  }, [proxySource, destroyHls, sourceIndex, sources.length, activateSource]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -245,18 +225,16 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
   const toggleFullscreen = async () => {
     const container = containerRef.current;
     if (!container) return;
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else await container.requestFullscreen();
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await container.requestFullscreen();
+    } catch { /* Fullscreen may be denied by the browser. */ }
   };
 
   const togglePiP = async () => {
     const video = videoRef.current as HTMLVideoElement & { requestPictureInPicture?: () => Promise<PictureInPictureWindow> };
     if (!video?.requestPictureInPicture) return;
-    try {
-      await video.requestPictureInPicture();
-    } catch {
-      // Browser may reject PiP while another PiP session is active.
-    }
+    try { await video.requestPictureInPicture(); } catch { /* Browser may reject PiP. */ }
   };
 
   return (
@@ -273,23 +251,15 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
         if (event.key.toLowerCase() === 'm') setMuted((value) => !value);
       }}
     >
-      <video
-        ref={videoRef}
-        className="pro-player-video"
-        poster={channel.image || undefined}
-        playsInline
-        preload="metadata"
-        onDoubleClick={() => void toggleFullscreen()}
-      />
+      <video ref={videoRef} className="pro-player-video" poster={channel.image || undefined} playsInline preload="metadata" onDoubleClick={() => void toggleFullscreen()} />
 
       {loading && !error && <div className="pro-player-loader"><span className="spinner" /><span>در حال اتصال به پخش زنده…</span></div>}
-
       {error && (
         <div className="pro-player-error">
           <div>
             <div className="pro-player-error-title">پخش متوقف شد</div>
             <div className="muted">{error}</div>
-            <button className="pro-player-retry" onClick={() => activateSource(sourceIndex)}> <RotateCcw size={15} /> تلاش مجدد </button>
+            <button className="pro-player-retry" onClick={() => activateSource(sourceIndex)}><RotateCcw size={15} /> تلاش مجدد</button>
           </div>
         </div>
       )}
@@ -326,11 +296,11 @@ export default function Player({ channel }: { channel: PlayerChannel }) {
       <div className="pro-player-controls">
         <button className="icon-button large" onClick={togglePlay} title={playing ? 'Pause' : 'Play'}>{playing ? <Pause size={21} /> : <Play size={21} />}</button>
         <button className="icon-button" onClick={() => setMuted((value) => !value)} title="Mute">{muted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
-        <input className="volume-slider" type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} onChange={(event) => { setVolume(Number(event.target.value)); setMuted(Number(event.target.value) === 0); }} aria-label="Volume" />
+        <input className="volume-slider" type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} onChange={(event) => { const next = Number(event.target.value); setVolume(next); setMuted(next === 0); }} aria-label="Volume" />
         <div className="pro-player-spacer" />
         {levels.length > 0 && <button className="text-button" onClick={() => { setShowSources(false); setShowQuality((value) => !value); }}>HD</button>}
         <button className="text-button live-text">LIVE</button>
-        {videoRef.current?.requestPictureInPicture && <button className="icon-button" onClick={() => void togglePiP()} title="Picture in Picture"><PictureInPicture2 size={18} /></button>}
+        <button className="icon-button" onClick={() => void togglePiP()} title="Picture in Picture"><PictureInPicture2 size={18} /></button>
         <button className="icon-button" onClick={() => void toggleFullscreen()} title="Fullscreen">{fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}</button>
       </div>
     </div>
