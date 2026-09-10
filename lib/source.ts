@@ -285,6 +285,44 @@ const pakhshZendeAdapter: CatalogSourceAdapter = {
   isEnabled: () => envFlag('SOURCE_PAKHSHZENDE_ENABLED', true), isConfigured: () => Boolean(process.env.SOURCE_PAKHSHZENDE_INDEX_URL?.trim()),
   async fetch() { return discoverSite(process.env.SOURCE_PAKHSHZENDE_INDEX_URL!.trim(), 'pakhshzende', /pakhshzende\.com\/tv-channel\//i); },
 };
+
+const iranInternationalAdapter: CatalogSourceAdapter = {
+  id: 'iran-international-official', name: 'Iran International official live', optional: true,
+  isEnabled: () => envFlag('SOURCE_IRANINTL_ENABLED', true),
+  isConfigured: () => Boolean(process.env.SOURCE_IRANINTL_LIVE_URL?.trim()),
+  async fetch() {
+    const url = process.env.SOURCE_IRANINTL_LIVE_URL!.trim();
+    const image = process.env.SOURCE_IRANINTL_LOGO_URL?.trim() || null;
+    const channelId = stableId('official:iran-international');
+    const categoryId = stableId('official:news');
+    return [{
+      id: channelId,
+      catId: categoryId,
+      name: 'Iran International',
+      nameEn: 'Iran International',
+      image,
+      url,
+      referer: new URL(url).origin,
+      origin: new URL(url).origin,
+      vpn: false,
+      iran: true,
+      popular: 0,
+      vip: false,
+      language: 'fa',
+      country: 'UK',
+      platform: 'INTERNET',
+      satellite: process.env.SOURCE_IRANINTL_SATELLITE?.trim() || null,
+      frequency: process.env.SOURCE_IRANINTL_FREQUENCY?.trim() || null,
+      polarization: process.env.SOURCE_IRANINTL_POLARIZATION?.trim() || null,
+      symbolRate: process.env.SOURCE_IRANINTL_SYMBOL_RATE?.trim() || null,
+      serviceId: process.env.SOURCE_IRANINTL_SERVICE_ID?.trim() || null,
+      category: 'News',
+      categoryEn: 'news',
+      sources: [{ id: stableId('official:iran-international:source'), title: 'Official Live', url, referer: new URL(url).origin, origin: new URL(url).origin, country: 'UK', vip: false }],
+    }];
+  },
+};
+
 const m3uAdapter: CatalogSourceAdapter = {
   id: 'm3u-import', name: 'M3U playlist importer', optional: true,
   isEnabled: () => envFlag('SOURCE_M3U_ENABLED', true), isConfigured: () => Boolean(process.env.SOURCE_M3U_URLS?.trim()),
@@ -296,7 +334,7 @@ const officialAdapter: CatalogSourceAdapter = {
   async fetch() { const urls = unique((process.env.SOURCE_OFFICIAL_URLS ?? '').split(/[\n,]/).map((v) => v.trim())); const payloads = await Promise.all(urls.map((url) => fetchText(url))); return payloads.flatMap((text) => { try { const json = JSON.parse(text) as unknown; if (Array.isArray(json)) return normalizePosts(json as RawPost[]); if (json && typeof json === 'object' && 'posts' in json) return normalizePosts(json as { posts?: RawPost[] }); } catch {} return parseM3u(text, 'official-feed'); }); },
 };
 
-export const catalogSourceAdapters: CatalogSourceAdapter[] = [myTvSatAdapter, parsaTvAdapter, persianTvLiveAdapter, pakhshZendeAdapter, m3uAdapter, officialAdapter];
+export const catalogSourceAdapters: CatalogSourceAdapter[] = [myTvSatAdapter, iranInternationalAdapter, parsaTvAdapter, persianTvLiveAdapter, pakhshZendeAdapter, m3uAdapter, officialAdapter];
 
 export async function fetchCatalogSources(): Promise<CatalogSourceResult[]> {
   const results: CatalogSourceResult[] = [];
