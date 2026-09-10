@@ -40,9 +40,25 @@ function toCatalog(channel: DbChannel): Channel {
   };
 }
 
+async function fetchCatalogFromDb(): Promise<Channel[] | null> {
+  if (!process.env.DATABASE_URL?.trim()) return null;
+
+  try {
+    const rows = await prisma.channel.findMany({
+      orderBy: [{ popular: 'desc' }, { name: 'asc' }],
+      include: dbInclude,
+    });
+    return rows.map(toCatalog);
+  } catch (error) {
+    console.warn('[catalog-db] Database unavailable, falling back to configured catalog sources.', error);
+    return null;
+  }
+}
+
 export async function getCatalog() {
-  const rows = await prisma.channel.findMany({ orderBy: [{ popular: 'desc' }, { name: 'asc' }], include: dbInclude });
-  return rows.length ? rows.map(toCatalog) : fetchCatalog();
+  const databaseCatalog = await fetchCatalogFromDb();
+  if (databaseCatalog && databaseCatalog.length > 0) return databaseCatalog;
+  return fetchCatalog();
 }
 
 export function getCategories(channels: Channel[]) {
@@ -51,8 +67,16 @@ export function getCategories(channels: Channel[]) {
 
 export async function findChannel(id: number) {
   if (!Number.isInteger(id) || id <= 0) return null;
-  const row = await prisma.channel.findUnique({ where: { id }, include: dbInclude });
-  if (row) return toCatalog(row);
+
+  if (process.env.DATABASE_URL?.trim()) {
+    try {
+      const row = await prisma.channel.findUnique({ where: { id }, include: dbInclude });
+      if (row) return toCatalog(row);
+    } catch (error) {
+      console.warn('[catalog-db] Database unavailable while resolving channel, using source catalog.', error);
+    }
+  }
+
   const channels = await fetchCatalog();
   return channels.find((channel) => channel.id === id) ?? null;
 }
