@@ -10,7 +10,7 @@ type HlsCtor = { new (config?: Record<string, unknown>): HlsInstance; isSupporte
 
 function usable(url: string) { return /^https?:\/\//i.test(url.trim()); }
 function proxied(source: Source) {
-  const qs = new URLSearchParams({ url: source.url });
+  const qs = new URLSearchParams({ url: source.url.trim() });
   if (source.referer) qs.set('referer', source.referer);
   if (source.origin) qs.set('origin', source.origin);
   return `/api/stream?${qs.toString()}`;
@@ -18,9 +18,8 @@ function proxied(source: Source) {
 function score(source: Source, index: number) {
   const u = source.url.toLowerCase();
   let value = 0;
-  if (u.includes('.m3u8')) value += 100;
+  if (/\.m3u8(?:$|[?#])/.test(u)) value += 100;
   if (u.includes('playlist') || u.includes('stream')) value += 10;
-  if (source.country === 'worldwide') value += 3;
   if (!source.vip) value += 2;
   return value - index / 1000;
 }
@@ -36,6 +35,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const playingRef = useRef(false);
   const volumeRef = useRef(0.85);
   const mutedRef = useRef(true);
+
   const [sourceIndex, setSourceIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
@@ -59,7 +59,12 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     raw.push(...(channel.sources ?? []).filter((source) => usable(source.url)));
     const unique = Array.from(new Map(raw.map((source) => [source.url.trim(), source])).values());
     return unique.sort((a, b) => score(b, unique.indexOf(b)) - score(a, unique.indexOf(a)));
-  }, [channel]);
+  }, [channel.url, channel.referer, channel.origin, channel.sources]);
+
+  const sourceSignature = useMemo(
+    () => sources.map((source) => `${source.url.trim()}|${source.referer ?? ''}|${source.origin ?? ''}`).join('\n'),
+    [sources],
+  );
 
   const clearTimers = useCallback(() => {
     if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
@@ -74,9 +79,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
   const revealControls = useCallback((autoHide = true) => {
     setControlsVisible(true);
     if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
-    if (autoHide && playingRef.current) {
-      hideControlsTimerRef.current = setTimeout(() => setControlsVisible(false), 3200);
-    }
+    if (autoHide && playingRef.current) hideControlsTimerRef.current = setTimeout(() => setControlsVisible(false), 3200);
   }, []);
 
   const selectSource = useCallback((index: number) => {
@@ -105,13 +108,6 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     }
   }, [revealControls]);
 
-  const togglePlay = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) void play();
-    else video.pause();
-  }, [play]);
-
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !sources.length) {
@@ -126,17 +122,19 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     destroy();
     networkRetryRef.current = 0;
     mediaRecoveryRef.current = false;
-    setControlsVisible(true);
 
     const source = sources[sourceIndex] ?? sources[0];
     const url = proxied(source);
-    const applyState = () => { video.volume = volumeRef.current; video.muted = mutedRef.current; };
+    const applyState = () => {
+      video.volume = volumeRef.current;
+      video.muted = mutedRef.current;
+    };
 
     const failover = (message: string) => {
       if (cancelled) return;
       if (sourceIndex + 1 < sources.length) {
         setError(`${message} مسیر بعدی امتحان می‌شود…`);
-        retryTimerRef.current = setTimeout(() => { if (!cancelled) selectSource(sourceIndex + 1); }, 800);
+        retryTimerRef.current = setTimeout(() => { if (!cancelled) selectSource(sourceIndex + 1); }, 1200);
       } else {
         setLoading(false);
         setError(`${message} هیچ مسیر دیگری برای پخش باقی نمانده است.`);
@@ -148,26 +146,28 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
       if (!cancelled) { setLoading(false); setPlaying(true); revealControls(true); }
     };
     const onPause = () => {
-      if (!cancelled) { setPlaying(false); setControlsVisible(true); }
+      if (!cancelled && !video.ended) { setPlaying(false); setControlsVisible(true); }
     };
-    const onWaiting = () => { if (!cancelled) setLoading(true); };
-    const onLoaded = () => {
+    const onWaiting = () => {
+      if (!cancelled && !video.paused) setLoading(true);
+    };
+    const onLoadedMetadata = () => {
       if (cancelled) return;
       applyState();
       setLoading(false);
       void play();
     };
-    const onError = () => { if (!cancelled) failover('منبع فعلی قابل پخش نیست.'); };
+    const onVideoError = () => failover('خطای ویدئو در منبع فعلی.');
 
-    video.addEventListener('playing', onPlaying);
-    video.addEventListener('pause', onPause);
-    video.addEventListener('waiting', onWaiting);
-    video.addEventListener('loadedmetadata', onLoaded);
-    video.addEventListener('canplay', onLoaded);
-    video.addEventListener('error', onError);
+    // Reset before attaching failure listeners so the initial empty-src load is never treated as a stream failure.
     video.pause();
     video.removeAttribute('src');
     video.load();
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('pause', onPause);
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('loadedmetadata', onLoadedMetadata);
+    video.addEventListener('error', onVideoError);
 
     (async () => {
       try {
@@ -176,6 +176,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
         const Hls = mod.default as unknown as HlsCtor;
 
         if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          applyState();
           video.src = url;
           video.load();
           return;
@@ -187,50 +188,61 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
           return;
         }
 
-        localHls = new Hls({
+        const hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: true,
-          liveSyncDurationCount: 3,
-          liveMaxLatencyDurationCount: 8,
+          lowLatencyMode: false,
           backBufferLength: 30,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 90,
-          manifestLoadingMaxRetry: 2,
-          levelLoadingMaxRetry: 3,
-          fragLoadingMaxRetry: 3,
-          capLevelToPlayerSize: true,
+          maxBufferLength: 45,
+          maxMaxBufferLength: 120,
+          liveSyncDurationCount: 4,
+          liveMaxLatencyDurationCount: 12,
+          maxLiveSyncPlaybackRate: 1.2,
+          manifestLoadingMaxRetry: 4,
+          levelLoadingMaxRetry: 6,
+          fragLoadingMaxRetry: 6,
+          fragLoadingTimeOut: 20000,
+          manifestLoadingTimeOut: 20000,
+          levelLoadingTimeOut: 20000,
+          capLevelToPlayerSize: false,
+          startLevel: -1,
+          nudgeOffset: 0.2,
+          nudgeMaxRetry: 5,
+          maxBufferHole: 0.8,
         });
-        hlsRef.current = localHls;
+        localHls = hls;
+        hlsRef.current = hls;
 
-        localHls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (cancelled || !localHls) return;
-          const nextLevels = localHls.levels
-            .map((level, index) => ({ index, label: level.height ? `${level.height}p` : level.bitrate ? `${Math.round(level.bitrate / 1000)} kbps` : `Level ${index + 1}` }))
-            .filter((level, index, all) => all.findIndex((item) => item.label === level.label) === index);
-          setLevels(nextLevels);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (cancelled || hlsRef.current !== hls) return;
+          const nextLevels = hls.levels.map((level, index) => ({
+            index,
+            label: level.height ? `${level.height}p` : level.bitrate ? `${Math.round(level.bitrate / 1000)} kbps` : `Level ${index + 1}`,
+          }));
+          setLevels(nextLevels.filter((level, index, all) => all.findIndex((item) => item.label === level.label) === index));
           applyState();
           setLoading(false);
           void play();
         });
 
-        localHls.on(Hls.Events.ERROR, (_event, data) => {
-          if (cancelled || !data?.fatal) return;
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (cancelled || hlsRef.current !== hls || !data?.fatal) return;
           if (data.type === 'mediaError' && !mediaRecoveryRef.current) {
             mediaRecoveryRef.current = true;
-            localHls?.recoverMediaError();
+            hls.recoverMediaError();
             return;
           }
-          if (data.type === 'networkError' && networkRetryRef.current < 2) {
+          if (data.type === 'networkError' && networkRetryRef.current < 4) {
             networkRetryRef.current += 1;
-            setError(`اتصال به منبع ناپایدار است. تلاش ${networkRetryRef.current} از 2…`);
-            localHls?.startLoad(-1);
+            setError(`اتصال ناپایدار است؛ تلاش مجدد ${networkRetryRef.current} از 4…`);
+            hls.startLoad(-1);
             return;
           }
           failover(data.type === 'networkError' ? 'خطای شبکه در منبع فعلی.' : 'خطای HLS در منبع فعلی.');
         });
 
-        localHls.loadSource(url);
-        localHls.attachMedia(video);
+        applyState();
+        hls.loadSource(url);
+        hls.attachMedia(video);
       } catch {
         if (!cancelled) failover('راه‌اندازی HLS ناموفق بود.');
       }
@@ -244,11 +256,10 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('pause', onPause);
       video.removeEventListener('waiting', onWaiting);
-      video.removeEventListener('loadedmetadata', onLoaded);
-      video.removeEventListener('canplay', onLoaded);
-      video.removeEventListener('error', onError);
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      video.removeEventListener('error', onVideoError);
     };
-  }, [channel, clearTimers, destroy, play, selectSource, sourceIndex, sources]);
+  }, [sourceSignature, sourceIndex, clearTimers, destroy, play, selectSource, sources]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -271,18 +282,17 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
       else await rootRef.current.requestFullscreen();
-    } catch {
-      // Fullscreen can be denied by browser policy.
-    }
+    } catch {}
   }, []);
 
   const togglePip = useCallback(async () => {
     const video = videoRef.current as HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> };
     if (!video.requestPictureInPicture) return;
-    try { await video.requestPictureInPicture(); } catch { /* Browser may reject PiP. */ }
+    try { await video.requestPictureInPicture(); } catch {}
   }, []);
 
   const resetToCurrentSource = useCallback(() => selectSource(sourceIndex), [selectSource, sourceIndex]);
+  const currentSource = sources[sourceIndex] ?? sources[0];
 
   return (
     <div
@@ -303,7 +313,7 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
         className="pro-player-video"
         poster={channel.image || undefined}
         playsInline
-        preload="metadata"
+        preload="auto"
         muted={muted}
         onClick={togglePlay}
         onDoubleClick={() => void toggleFullscreen()}
@@ -323,13 +333,12 @@ export default function PlayerV2({ channel }: { channel: Channel }) {
       <div className="pro-player-controls">
         <button className="icon-button large" onClick={togglePlay} title={playing ? 'توقف' : 'پخش'}>{playing ? <Pause size={21} /> : <Play size={21} />}</button>
         <button className="icon-button" onClick={() => setMuted((value) => !value)} title={muted ? 'فعال کردن صدا' : 'بی‌صدا'}>{muted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
-        <input className="volume-slider" type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} aria-label="Volume" onChange={(event) => { const next = Number(event.target.value); setVolume(next); setMuted(next === 0); }} />
+        <input className="volume-slider" type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} onChange={(event) => { const next = Number(event.target.value); setVolume(next); setMuted(next === 0); }} aria-label="Volume" />
         <div className="pro-player-spacer" />
-        <span className="pro-player-source-status">{sourceIndex + 1}/{Math.max(sources.length, 1)}</span>
-        {levels.length > 0 && <button className="text-button" onClick={() => setShowQuality((value) => !value)}>HD</button>}
+        {levels.length > 0 && <button className="text-button" onClick={() => { setShowSources(false); setShowQuality((value) => !value); }}>HD</button>}
         <button className="text-button live-text">LIVE</button>
-        <button className="icon-button" onClick={() => void togglePip()} title="Picture in picture"><PictureInPicture2 size={18} /></button>
-        <button className="icon-button" onClick={() => void toggleFullscreen()} title={fullscreen ? 'خروج از تمام صفحه' : 'تمام صفحه'}>{fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}</button>
+        <button className="icon-button" onClick={() => void togglePip()} title="Picture in Picture"><PictureInPicture2 size={18} /></button>
+        <button className="icon-button" onClick={() => void toggleFullscreen()} title="Fullscreen">{fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}</button>
       </div>
     </div>
   );
