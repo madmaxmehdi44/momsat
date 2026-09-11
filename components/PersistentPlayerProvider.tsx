@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import PlayerProEnhanced from './PlayerProEnhanced';
+import StreamAccelerator from './StreamAccelerator';
 import styles from './PersistentPlayerProvider.module.css';
 
 type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
@@ -13,6 +14,7 @@ type PersistentPlayerContextValue = {
   stopPlayer: () => void;
 };
 
+const STORAGE_KEY = 'momsat.persistent-player.v1';
 const PersistentPlayerContext = createContext<PersistentPlayerContextValue | null>(null);
 
 export function usePersistentPlayer() {
@@ -25,6 +27,13 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const [activeChannel, setActiveChannelState] = useState<PersistentChannel | null>(null);
   const [collapsed, setCollapsed] = useState(false);
 
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (raw) setActiveChannelState(JSON.parse(raw) as PersistentChannel);
+    } catch {}
+  }, []);
+
   const setActiveChannel = (channel: PersistentChannel) => {
     setCollapsed(false);
     setActiveChannelState(channel);
@@ -32,14 +41,18 @@ export default function PersistentPlayerProvider({ children }: { children: React
 
   const stopPlayer = () => {
     setCollapsed(true);
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
   };
 
   useEffect(() => {
-    if (!activeChannel) return;
-    try {
-      sessionStorage.setItem('momsat.persistent-player.v1', JSON.stringify(activeChannel));
-    } catch {}
-  }, [activeChannel]);
+    document.body.style.paddingBottom = activeChannel && !collapsed ? '208px' : '';
+    return () => { document.body.style.paddingBottom = ''; };
+  }, [activeChannel, collapsed]);
+
+  useEffect(() => {
+    if (!activeChannel || collapsed) return;
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(activeChannel)); } catch {}
+  }, [activeChannel, collapsed]);
 
   const value = useMemo(() => ({ activeChannel, setActiveChannel, stopPlayer }), [activeChannel]);
 
@@ -49,6 +62,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
       {activeChannel && !collapsed ? (
         <aside className={styles.root} aria-label="MOMSAT player">
           <div className={styles.inner}>
+            <StreamAccelerator urls={(activeChannel.sources ?? []).map((source) => source.url)} />
             <PlayerProEnhanced channel={activeChannel} />
             <button className={styles.close} type="button" onClick={stopPlayer} aria-label="بستن پلیر شناور">×</button>
           </div>
