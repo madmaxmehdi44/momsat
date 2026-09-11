@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, createPortal, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { usePathname } from 'next/navigation';
 import PlayerProEnhanced from './PlayerProEnhanced';
 import StreamAccelerator from './StreamAccelerator';
