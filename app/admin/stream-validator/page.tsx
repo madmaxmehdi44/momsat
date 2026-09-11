@@ -42,17 +42,19 @@ async function captureStreamFrame(result: Probe): Promise<string | null> {
   video.style.opacity = '0';
   document.body.appendChild(video);
 
-  let hls: { destroy: () => void; loadSource: (url: string) => void; attachMedia: (media: HTMLVideoElement) => void; on: (event: string, fn: () => void) => void } | null = null;
+  type HlsInstance = InstanceType<typeof import('hls.js').default>;
+  let hls: HlsInstance | undefined;
   try {
     const target = proxyStreamUrl(result);
     if (result.protocol === 'HLS') {
       const mod = await import('hls.js');
       const Hls = mod.default;
       if (!Hls.isSupported()) return null;
-      hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 20, backBufferLength: 10 });
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => { void video.play().catch(() => undefined); });
-      hls.loadSource(target);
+      const instance = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 20, backBufferLength: 10 });
+      hls = instance;
+      instance.attachMedia(video);
+      instance.on(Hls.Events.MANIFEST_PARSED, () => { void video.play().catch(() => undefined); });
+      instance.loadSource(target);
     } else {
       video.src = target;
       video.load();
