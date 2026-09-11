@@ -3,11 +3,17 @@
 import Link from 'next/link';
 import { useMemo } from 'react';
 import type { Channel } from '../lib/source';
+import { featuredSpotlightOrder } from '../lib/featured-channels';
 import styles from './BrowseHero.module.css';
 
 type Props = { channels: Channel[] };
 
 function pickHero(channels: Channel[]) {
+  for (const name of featuredSpotlightOrder) {
+    const wanted = name.toLowerCase();
+    const match = channels.find((channel) => channel.name.toLowerCase() === wanted || channel.nameEn.toLowerCase() === wanted);
+    if (match && match.sources.length > 0) return match;
+  }
   return [...channels].sort((a, b) => b.popular - a.popular || (b.sources?.length ?? 0) - (a.sources?.length ?? 0))[0] ?? null;
 }
 
