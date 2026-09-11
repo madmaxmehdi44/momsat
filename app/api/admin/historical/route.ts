@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getHistoricalChannels, updateHistoricalChannel, type HistoricalStatus } from '../../../../../lib/historical-catalog';
+import { getHistoricalChannels, updateHistoricalChannel, type HistoricalStatus } from '../../../../lib/historical-catalog';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
