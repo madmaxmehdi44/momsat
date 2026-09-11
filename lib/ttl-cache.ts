@@ -1,7 +1,4 @@
-type Entry<T> = {
-  value: T;
-  expiresAt: number;
-};
+type Entry<T> = { value: T; expiresAt: number };
 
 const cache = new Map<string, Entry<unknown>>();
 const MAX_ENTRIES = 1000;
@@ -35,14 +32,17 @@ export function ttlSet<T>(key: string, value: T, ttlMs: number): T {
   return value;
 }
 
+export function ttlDelete(key: string) {
+  cache.delete(key);
+  cache.delete(`${key}:pending`);
+}
+
 export async function ttlGetOrSet<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
   const cached = ttlGet<T>(key);
   if (cached !== undefined) return cached;
-
   const pendingKey = `${key}:pending`;
   const pending = ttlGet<Promise<T>>(pendingKey);
   if (pending) return pending;
-
   const promise = loader().then((value) => {
     ttlSet(key, value, ttlMs);
     cache.delete(pendingKey);
@@ -51,7 +51,6 @@ export async function ttlGetOrSet<T>(key: string, ttlMs: number, loader: () => P
     cache.delete(pendingKey);
     throw error;
   });
-
   ttlSet(pendingKey, promise, Math.max(ttlMs, 10_000));
   return promise;
 }
