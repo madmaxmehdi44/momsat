@@ -32,6 +32,9 @@ export function getChannelThumbnail(name?: string | null): string | null {
 export function ensureChannelThumbnail(name: string | null | undefined, image: string | null | undefined): string | null {
   const value = name?.trim() || 'MOMSAT';
   const existing = image?.trim();
-  if (existing && /^(data:|blob:|\/)/i.test(existing)) return existing;
+
+  // Preserve any valid URL/data/blob image supplied by the catalog.
+  if (existing && /^(https?:|data:|blob:|\/)/i.test(existing)) return existing;
+
   return getChannelThumbnail(value) || fallbackChannelThumbnail(value);
 }
