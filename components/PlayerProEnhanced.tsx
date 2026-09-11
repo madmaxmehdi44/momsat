@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BarChart3, Check, Maximize2, MonitorPlay, PictureInPicture2, RefreshCw, Settings2, Volume2, VolumeX, X } from 'lucide-react';
 import PlayerPro from './PlayerPro';
 import styles from './PlayerProEnhanced.module.css';
@@ -9,6 +9,8 @@ import { DEFAULT_APP_SETTINGS, loadAppSettings, saveAppSettings, subscribeAppSet
 export default function PlayerProEnhanced({ channel }: { channel: { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Array<{ url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean }> } }) {
   const shellRef = useRef<HTMLDivElement>(null);
   const qualityApplyStarted = useRef(false);
+  const autoplayGestureUntil = useRef(0);
+  const guardedVideoRef = useRef<{ video: HTMLVideoElement; play: HTMLVideoElement['play'] } | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [settingsReady, setSettingsReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -33,6 +35,58 @@ export default function PlayerProEnhanced({ channel }: { channel: { id?: number;
   }, []);
 
   const getVideo = useCallback(() => shellRef.current?.querySelector('video') as HTMLVideoElement | null, []);
+
+  useEffect(() => {
+    const root = shellRef.current;
+    if (!root) return;
+    const markUserGesture = () => { autoplayGestureUntil.current = Date.now() + 1200; };
+    root.addEventListener('pointerdown', markUserGesture, true);
+    root.addEventListener('touchstart', markUserGesture, true);
+    root.addEventListener('keydown', markUserGesture, true);
+    return () => {
+      root.removeEventListener('pointerdown', markUserGesture, true);
+      root.removeEventListener('touchstart', markUserGesture, true);
+      root.removeEventListener('keydown', markUserGesture, true);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!settingsReady) return;
+    const video = getVideo();
+    if (!video) return;
+
+    const previous = guardedVideoRef.current;
+    if (previous && previous.video !== video) {
+      previous.video.play = previous.play;
+      guardedVideoRef.current = null;
+    }
+
+    if (settings.autoplay) {
+      const guarded = guardedVideoRef.current;
+      if (guarded?.video === video) {
+        video.play = guarded.play;
+        guardedVideoRef.current = null;
+      }
+      return;
+    }
+
+    if (!guardedVideoRef.current || guardedVideoRef.current.video !== video) {
+      const originalPlay = video.play.bind(video);
+      guardedVideoRef.current = { video, play: originalPlay };
+      video.play = () => {
+        if (Date.now() <= autoplayGestureUntil.current) return originalPlay();
+        return Promise.reject(new DOMException('Autoplay is disabled in MOMSAT settings.', 'NotAllowedError'));
+      };
+    }
+
+    return () => {
+      const guarded = guardedVideoRef.current;
+      if (guarded?.video === video) {
+        video.play = guarded.play;
+        guardedVideoRef.current = null;
+      }
+    };
+  }, [getVideo, settings.autoplay, settingsReady, channel.id]);
 
   useEffect(() => {
     if (!settingsReady) return;
