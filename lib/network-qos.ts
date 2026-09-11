@@ -111,8 +111,11 @@ export function scheduleAppNetworkRequest<T>(task: () => Promise<T>, options: { 
   });
 }
 
-export function setLowNetworkPriority(init: RequestInit | undefined, streaming: boolean) {
+export function setRequestPriority(
+  init: RequestInit | undefined,
+  priority: 'high' | 'low' | 'auto',
+) {
   const next = { ...(init || {}) } as RequestInit & { priority?: 'high' | 'low' | 'auto' };
-  if (!next.priority) next.priority = streaming ? 'low' : 'auto';
+  if (!next.priority) next.priority = priority;
   return next;
 }
