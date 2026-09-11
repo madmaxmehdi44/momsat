@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Palette, Play, RotateCcw, Settings2, Sparkles, VolumeX, Wifi } from 'lucide-react';
 import { applyAppLanguage, applyAppTheme, DEFAULT_APP_SETTINGS, loadAppSettings, saveAppSettings, type AppLanguage, type AppSettings, type AppTheme, type DefaultQuality } from '../../lib/app-settings';
+import { finishAction, startAction } from '../../lib/action-feedback';
 import styles from './settings.module.css';
 
 const QUALITY_OPTIONS: Array<[DefaultQuality, string]> = [['auto', 'خودکار (پیشنهادی)'], ['2160', '2160p · 4K'], ['1440', '1440p · 2K'], ['1080', '1080p · Full HD'], ['720', '720p · HD'], ['480', '480p · SD'], ['360', '360p · Data Saver']];
@@ -23,10 +24,17 @@ export default function SettingsClient() {
     applyAppLanguage(loaded.language);
   }, []);
 
-  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    const next = { ...settings, [key]: value };
+  const persistWithFeedback = (next: AppSettings) => {
+    const actionId = 'settings:persist';
+    startAction(actionId, 'در حال اعمال و ذخیره تنظیمات');
     setSettings(next);
     saveAppSettings(next);
+    window.requestAnimationFrame(() => finishAction(actionId, 'تنظیمات ذخیره شد'));
+  };
+
+  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    const next = { ...settings, [key]: value };
+    persistWithFeedback(next);
     if (key === 'theme') applyAppTheme(value as AppTheme);
     if (key === 'language') applyAppLanguage(value as AppLanguage);
     setSaved(true);
@@ -35,8 +43,7 @@ export default function SettingsClient() {
 
   const updateProfile = (patch: Partial<AppSettings>) => {
     const next = { ...settings, ...patch };
-    setSettings(next);
-    saveAppSettings(next);
+    persistWithFeedback(next);
     applyAppTheme(next.theme);
     applyAppLanguage(next.language);
     setSaved(true);
@@ -44,8 +51,7 @@ export default function SettingsClient() {
   };
 
   const reset = () => {
-    setSettings(DEFAULT_APP_SETTINGS);
-    saveAppSettings(DEFAULT_APP_SETTINGS);
+    persistWithFeedback(DEFAULT_APP_SETTINGS);
     applyAppTheme(DEFAULT_APP_SETTINGS.theme);
     applyAppLanguage(DEFAULT_APP_SETTINGS.language);
     setSaved(true);
