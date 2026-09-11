@@ -22,7 +22,6 @@ const select = {
   archiveStatus: true,
   archiveNote: true,
   archiveSince: true,
-  id: true,
   categoryName: true,
 } as const;
 
@@ -30,23 +29,21 @@ export async function getHistoricalChannels(status?: HistoricalStatus): Promise<
   if (!process.env.DATABASE_URL?.trim()) return [];
   try {
     const rows = await prisma.channel.findMany({
-      where: { archiveStatus: status },
+      ...(status ? { where: { archiveStatus: status } } : {}),
       select,
       orderBy: [{ archiveSince: 'desc' }, { name: 'asc' }],
     });
-    return rows
-      .filter((row) => row.archiveStatus)
-      .map((row) => ({
-        id: row.id,
-        name: row.name,
-        nameEn: row.nameEn,
-        image: row.image,
-        status: row.archiveStatus as HistoricalStatus,
-        note: row.archiveNote,
-        since: row.archiveSince?.toISOString() ?? null,
-        channelId: row.id,
-        category: row.categoryName,
-      }));
+    return rows.filter((row) => row.archiveStatus).map((row) => ({
+      id: row.id,
+      name: row.name,
+      nameEn: row.nameEn,
+      image: row.image,
+      status: row.archiveStatus as HistoricalStatus,
+      note: row.archiveNote,
+      since: row.archiveSince?.toISOString() ?? null,
+      channelId: row.id,
+      category: row.categoryName,
+    }));
   } catch (error) {
     console.warn('[historical-catalog] Unable to load historical catalog.', error);
     return [];
