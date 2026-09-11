@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { fetchCatalog, categoriesOf, Channel } from './source';
 import { ensureChannelThumbnail } from './channel-thumbnail';
+import { fallbackChannelThumbnail } from './fallback-thumbnail';
 import { ttlGetOrSet } from './ttl-cache';
 import { rankCatalogChannels } from './catalog-ranking';
 import { mergeFeaturedChannels } from './featured-channels';
@@ -31,7 +32,7 @@ function toCatalog(channel: DbChannel): Channel {
     catId: channel.categoryId,
     name: channel.name,
     nameEn: channel.nameEn,
-    image: ensureChannelThumbnail(channel.nameEn || channel.name, channel.image),
+    image: ensureChannelThumbnail(channel.nameEn || channel.name, channel.image) || fallbackChannelThumbnail(channel.nameEn || channel.name, channel.categoryName || channel.category.name),
     url: channel.url,
     referer: channel.referer,
     origin: channel.origin,
@@ -56,7 +57,11 @@ function toCatalog(channel: DbChannel): Channel {
 async function normalizeCatalog(channels: Channel[]) {
   const merged = mergeFeaturedChannels(channels);
   const ranked = rankCatalogChannels(merged);
-  return applyStreamHealth(ranked);
+  const healthApplied = await applyStreamHealth(ranked);
+  return healthApplied.map((channel) => ({
+    ...channel,
+    image: channel.image || fallbackChannelThumbnail(channel.nameEn || channel.name, channel.category),
+  }));
 }
 
 async function fetchCatalogFromDb(): Promise<Channel[] | null> {
@@ -83,7 +88,7 @@ async function loadCatalog(): Promise<Channel[]> {
 }
 
 export async function getCatalog() {
-  return ttlGetOrSet('momsat:catalog:v5:database-first-health-ranked', catalogTtlMs(), loadCatalog);
+  return ttlGetOrSet('momsat:catalog:v6:database-first-health-ranked-thumbnails', catalogTtlMs(), loadCatalog);
 }
 
 export function getCategories(channels: Channel[]) {
