@@ -24,16 +24,23 @@ export default function SettingsClient() {
   }, []);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    setSettings((current) => ({ ...current, [key]: value }));
-    setSaved(false);
+    const next = { ...settings, [key]: value };
+    setSettings(next);
+    saveAppSettings(next);
+    if (key === 'theme') applyAppTheme(value as AppTheme);
+    if (key === 'language') applyAppLanguage(value as AppLanguage);
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1200);
   };
 
-  const persist = () => {
-    saveAppSettings(settings);
-    applyAppTheme(settings.theme);
-    applyAppLanguage(settings.language);
+  const updateProfile = (patch: Partial<AppSettings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    saveAppSettings(next);
+    applyAppTheme(next.theme);
+    applyAppLanguage(next.language);
     setSaved(true);
-    window.setTimeout(() => setSaved(false), 1800);
+    window.setTimeout(() => setSaved(false), 1200);
   };
 
   const reset = () => {
@@ -41,6 +48,8 @@ export default function SettingsClient() {
     saveAppSettings(DEFAULT_APP_SETTINGS);
     applyAppTheme(DEFAULT_APP_SETTINGS.theme);
     applyAppLanguage(DEFAULT_APP_SETTINGS.language);
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1200);
   };
 
   const qualityDescription = useMemo(() => QUALITY_OPTIONS.find(([value]) => value === settings.defaultQuality)?.[1] ?? 'خودکار', [settings.defaultQuality]);
@@ -49,14 +58,14 @@ export default function SettingsClient() {
     <main className={styles.page} dir="rtl">
       <div className={styles.header}>
         <div><div className={styles.eyebrow}>MOMSAT SETTINGS</div><h1>تنظیمات</h1><p>ظاهر برنامه، زبان، کیفیت پیش‌فرض و رفتار Player Pro از یک محل کنترل می‌شود.</p></div>
-        <div className={styles.actions}><button className={styles.reset} type="button" onClick={reset}><RotateCcw size={16} /> بازنشانی</button><button className={styles.save} type="button" onClick={persist}><Check size={16} /> {saved ? 'ذخیره شد' : 'ذخیره تنظیمات'}</button></div>
+        <div className={styles.actions}><button className={styles.reset} type="button" onClick={reset}><RotateCcw size={16} /> بازنشانی</button><button className={styles.save} type="button" disabled><Check size={16} /> {saved ? 'ذخیره شد' : 'ذخیره خودکار'}</button></div>
       </div>
 
       <div className={styles.layout}>
         <section className={styles.card}>
           <div className={styles.cardTitle}><Palette size={18} /><div><h2>قالب و زبان</h2><span>ظاهر و جهت رابط کاربری</span></div></div>
           <div className={styles.settingBlock}><label>قالب</label><div className={styles.themeGrid}>{THEMES.map(([value, title, description]) => <button key={value} type="button" onClick={() => update('theme', value)} className={`${styles.theme} ${settings.theme === value ? styles.selected : ''}`}><span className={`${styles.swatch} ${styles[`swatch_${value}`]}`} /><span><strong>{title}</strong><small>{description}</small></span>{settings.theme === value ? <Check size={16} /> : null}</button>)}</div></div>
-          <div className={styles.settingBlock}><label htmlFor="language">زبان رابط کاربری</label><select id="language" value={settings.language} onChange={(event) => update('language', event.target.value as AppLanguage)}><option value="fa">فارسی</option><option value="en">English</option></select><small className={styles.note}>زبان و جهت صفحه در مرورگر ذخیره می‌شود.</small></div>
+          <div className={styles.settingBlock}><label htmlFor="language">زبان رابط کاربری</label><select id="language" value={settings.language} onChange={(event) => update('language', event.target.value as AppLanguage)}><option value="fa">فارسی</option><option value="en">English</option></select><small className={styles.note}>تغییرات این بخش فوراً اعمال و روی همین دستگاه ذخیره می‌شوند.</small></div>
         </section>
 
         <section className={styles.card}>
@@ -82,13 +91,13 @@ export default function SettingsClient() {
         <section className={styles.card}>
           <div className={styles.cardTitle}><Settings2 size={18} /><div><h2>پروفایل‌های آماده</h2><span>تغییر چند تنظیم با یک انتخاب</span></div></div>
           <div className={styles.profiles}>
-            <button type="button" onClick={() => setSettings((current) => ({ ...current, lowLatency: true, autoFailover: true, defaultQuality: '720', mutedStart: true }))}><Wifi size={18} /><strong>اتصال ضعیف</strong><small>720p · Low Latency · Failover</small></button>
-            <button type="button" onClick={() => setSettings((current) => ({ ...current, lowLatency: false, autoFailover: true, defaultQuality: '1080' }))}><Play size={18} /><strong>متعادل</strong><small>1080p · پایدار</small></button>
-            <button type="button" onClick={() => setSettings((current) => ({ ...current, lowLatency: false, autoFailover: true, defaultQuality: '2160' }))}><VolumeX size={18} /><strong>بیشترین کیفیت</strong><small>اولویت رزولوشن · Failover</small></button>
+            <button type="button" onClick={() => updateProfile({ lowLatency: true, autoFailover: true, defaultQuality: '720', mutedStart: true })}><Wifi size={18} /><strong>اتصال ضعیف</strong><small>720p · Low Latency · Failover</small></button>
+            <button type="button" onClick={() => updateProfile({ lowLatency: false, autoFailover: true, defaultQuality: '1080' })}><Play size={18} /><strong>متعادل</strong><small>1080p · پایدار</small></button>
+            <button type="button" onClick={() => updateProfile({ lowLatency: false, autoFailover: true, defaultQuality: '2160' })}><VolumeX size={18} /><strong>بیشترین کیفیت</strong><small>اولویت رزولوشن · Failover</small></button>
           </div>
         </section>
       </div>
-      <div className={styles.footerNote}>تنظیمات در مرورگر جاری ذخیره می‌شوند.</div>
+      <div className={styles.footerNote}>تنظیمات به‌صورت خودکار در حافظهٔ محلی همین مرورگر ذخیره می‌شوند و بین reload و اجرای مجدد برنامه باقی می‌مانند.</div>
     </main>
   );
 }
