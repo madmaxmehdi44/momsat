@@ -11,8 +11,9 @@ type Source = { url: string; title?: string | null; referer?: string | null; ori
 export type PersistentChannel = { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
 type PlayerHostRect = { top: number; left: number; width: number; height: number };
 type CatalogResponse = { channels?: PersistentChannel[] };
+type MiniPosition = { left: number; top: number };
 
-type PersistentPlayerContextValue = {
+ type PersistentPlayerContextValue = {
   activeChannel: PersistentChannel | null;
   expanded: boolean;
   setActiveChannel: (channel: PersistentChannel) => void;
@@ -21,6 +22,9 @@ type PersistentPlayerContextValue = {
 };
 
 const STORAGE_KEY = 'momsat.persistent-player.v1';
+const MINI_POSITION_KEY = 'momsat.persistent-player.position.v1';
+const MINI_WIDTH = 420;
+const MINI_GAP = 16;
 const PersistentPlayerContext = createContext<PersistentPlayerContextValue | null>(null);
 
 function channelKey(channel: PersistentChannel) {
@@ -48,6 +52,16 @@ function isCurrentChannelPage(pathname: string | null, channel: PersistentChanne
   return normalized === `/channel/${channel.id}`;
 }
 
+function clampMiniPosition(position: MiniPosition, width = MINI_WIDTH, height = 244) {
+  if (typeof window === 'undefined') return position;
+  const maxLeft = Math.max(MINI_GAP, window.innerWidth - width - MINI_GAP);
+  const maxTop = Math.max(MINI_GAP, window.innerHeight - height - MINI_GAP);
+  return {
+    left: Math.min(Math.max(MINI_GAP, position.left), maxLeft),
+    top: Math.min(Math.max(MINI_GAP, position.top), maxTop),
+  };
+}
+
 export function usePersistentPlayer() {
   const value = useContext(PersistentPlayerContext);
   if (!value) throw new Error('usePersistentPlayer must be used inside PersistentPlayerProvider');
@@ -60,7 +74,10 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const [collapsed, setCollapsed] = useState(false);
   const [playerHost, setPlayerHost] = useState<HTMLElement | null>(null);
   const [hostRect, setHostRect] = useState<PlayerHostRect | null>(null);
+  const [miniPosition, setMiniPosition] = useState<MiniPosition | null>(null);
+  const [dragging, setDragging] = useState(false);
   const catalogPromiseRef = useRef<Promise<PersistentChannel[]> | null>(null);
+  const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
 
   const expanded = isCurrentChannelPage(pathname, activeChannel);
 
@@ -68,7 +85,28 @@ export default function PersistentPlayerProvider({ children }: { children: React
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) setActiveChannelState(JSON.parse(raw) as PersistentChannel);
+      const savedPosition = localStorage.getItem(MINI_POSITION_KEY);
+      if (savedPosition) {
+        const parsed = JSON.parse(savedPosition) as MiniPosition;
+        if (Number.isFinite(parsed.left) && Number.isFinite(parsed.top)) setMiniPosition(clampMiniPosition(parsed));
+      }
     } catch {}
+  }, []);
+
+  useEffect(() => {
+    const ensurePosition = () => {
+      setMiniPosition((current) => {
+        if (current) return clampMiniPosition(current);
+        if (typeof window === 'undefined') return current;
+        return clampMiniPosition({
+          left: window.innerWidth - MINI_WIDTH - MINI_GAP,
+          top: window.innerHeight - 244 - MINI_GAP,
+        });
+      });
+    };
+    ensurePosition();
+    window.addEventListener('resize', ensurePosition, { passive: true });
+    return () => window.removeEventListener('resize', ensurePosition);
   }, []);
 
   const setActiveChannel = useCallback((channel: PersistentChannel) => {
@@ -163,14 +201,46 @@ export default function PersistentPlayerProvider({ children }: { children: React
   }, [expanded, playerHost]);
 
   useEffect(() => {
-    document.body.style.paddingBottom = activeChannel && !collapsed && !expanded ? '112px' : '';
-    return () => { document.body.style.paddingBottom = ''; };
-  }, [activeChannel, collapsed, expanded]);
+    if (!miniPosition) return;
+    try { localStorage.setItem(MINI_POSITION_KEY, JSON.stringify(miniPosition)); } catch {}
+  }, [miniPosition]);
 
   useEffect(() => {
     if (!activeChannel || collapsed) return;
     try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(activeChannel)); } catch {}
   }, [activeChannel, collapsed]);
+
+  const handleMiniPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (expanded || !miniPosition) return;
+    if (event.button !== 0 && event.pointerType !== 'touch') return;
+    const rect = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!rect) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    setDragging(true);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, [expanded, miniPosition]);
+
+  const handleMiniPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || expanded) return;
+    const next = clampMiniPosition({
+      left: event.clientX - drag.offsetX,
+      top: event.clientY - drag.offsetY,
+    });
+    setMiniPosition(next);
+  }, [expanded]);
+
+  const endMiniDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setDragging(false);
+    try { event.currentTarget.releasePointerCapture?.(event.pointerId); } catch {}
+  }, []);
 
   const value = useMemo(() => ({
     activeChannel,
@@ -190,10 +260,21 @@ export default function PersistentPlayerProvider({ children }: { children: React
         left: hostRect.left,
         width: hostRect.width,
         height: hostRect.height,
+      } : miniPosition ? {
+        left: miniPosition.left,
+        top: miniPosition.top,
       } : undefined}
       aria-label="MOMSAT player"
     >
       <div className={styles.inner}>
+        <div
+          className={`${styles.dragHandle} ${dragging ? styles.dragging : ''}`}
+          onPointerDown={handleMiniPointerDown}
+          onPointerMove={handleMiniPointerMove}
+          onPointerUp={endMiniDrag}
+          onPointerCancel={endMiniDrag}
+          role="presentation"
+        />
         <StreamAccelerator urls={(activeChannel?.sources ?? []).map((source) => source.url)} />
         <PlayerProEnhanced channel={activeChannel!} />
         <button className={styles.close} type="button" onClick={stopPlayer} aria-label="بستن پلیر شناور">×</button>
