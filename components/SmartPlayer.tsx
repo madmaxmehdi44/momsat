@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { usePersistentPlayer, type PersistentChannel } from './PersistentPlayerProvider';
 import { clientCacheGet, clientCacheSet } from '../lib/client-cache';
 import styles from './SmartPlayer.module.css';
@@ -64,7 +65,8 @@ async function verifySources(sources: Source[]) {
 }
 
 export default function SmartPlayer({ channel }: { channel: Channel }) {
-  const { setActiveChannel, expanded, registerPlayerHost } = usePersistentPlayer();
+  const pathname = usePathname();
+  const { activeChannel, setActiveChannel, expanded, registerPlayerHost } = usePersistentPlayer();
   const candidates = useMemo(() => databaseCandidates(channel), [channel.id, channel.url, channel.referer, channel.origin, channel.sources]);
   const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
   const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url)), [candidates]);
@@ -96,6 +98,17 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
 
   useEffect(() => {
     if (!allSources.length) return;
+
+    const normalizedPath = (pathname || '').replace(/\/+$/, '');
+    const currentChannelIsExplicitTarget = channel.id != null && normalizedPath === `/channel/${channel.id}`;
+    const activeIsDifferent = activeChannel?.id != null && channel.id != null && activeChannel.id !== channel.id;
+
+    // The home page contains an automatic Featured SmartPlayer. It must never
+    // steal an already-playing channel just because the user navigated home.
+    // A channel detail page is an explicit target and is therefore allowed to
+    // switch the persistent player to that channel.
+    if (activeIsDifferent && !currentChannelIsExplicitTarget) return;
+
     const orderedSources = [...verified, ...allSources.filter((source) => !verified.some((item) => item.url === source.url))];
     const primary = orderedSources[0];
     if (!primary) return;
@@ -108,11 +121,11 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
       origin: primary.origin,
       sources: orderedSources,
     });
-  }, [allSources, verified, channel, setActiveChannel]);
+  }, [activeChannel?.id, allSources, channel, pathname, setActiveChannel, verified]);
 
   if (allSources.length > 0) {
     if (expanded) return <div ref={registerPlayerHost} className={styles.playerHost} aria-label="محل پخش زنده" />;
-    return <div className={styles.persistentNotice}>پلیر هوشمند در پایین صفحه فعال است و با جابه‌جایی بین صفحات قطع نمی‌شود.</div>;
+    return <div className={styles.persistentNotice}>پلیر هوشمند فعال است و با جابه‌جایی بین صفحات قطع نمی‌شود.</div>;
   }
   if (resolving) return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
   return <div className={styles.embedPlayer}><div className={styles.probing}>{resolutionError || 'برای این شبکه مسیر پخش در دیتابیس ثبت نشده است.'}</div></div>;
