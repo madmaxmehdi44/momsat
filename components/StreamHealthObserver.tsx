@@ -34,6 +34,7 @@ export default function StreamHealthObserver({ channel }: Props) {
   useEffect(() => {
     if (!channel?.id) return;
 
+    let attachedVideo: HTMLVideoElement | null = null;
     let currentUrl = '';
     let startedAt = 0;
     let lastCurrentTime = -1;
@@ -59,6 +60,19 @@ export default function StreamHealthObserver({ channel }: Props) {
         window.clearTimeout(freezeTimer);
         freezeTimer = null;
       }
+    };
+
+    const detach = (video: HTMLVideoElement | null) => {
+      if (!video) return;
+      video.removeEventListener('loadstart', onLoadStart);
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('timeupdate', onProgress);
+      video.removeEventListener('progress', onProgress);
+      video.removeEventListener('canplay', onProgress);
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('stalled', onWaiting);
+      video.removeEventListener('error', onError);
+      if (attachedVideo === video) attachedVideo = null;
     };
 
     const syncCurrentSource = () => {
@@ -135,13 +149,7 @@ export default function StreamHealthObserver({ channel }: Props) {
         const elapsed = now - lastProgressAt;
         if (elapsed >= FREEZE_FAILURE_MS) {
           failureReported = true;
-          report(
-            channel.id!,
-            currentUrl,
-            'failure',
-            Math.max(0, Math.round(now - startedAt)),
-            'Live playback frozen after recovery attempt',
-          );
+          report(channel.id!, currentUrl, 'failure', Math.max(0, Math.round(now - startedAt)), 'Live playback frozen after recovery attempt');
           return;
         }
 
@@ -181,20 +189,16 @@ export default function StreamHealthObserver({ channel }: Props) {
 
           failureReported = true;
           const mediaError = recovered.error;
-          report(
-            channel.id!,
-            currentUrl,
-            'failure',
-            Math.max(0, Math.round(performance.now() - startedAt)),
-            mediaError ? `MediaError ${mediaError.code} after recovery` : 'HTMLMediaElement error after recovery grace',
-          );
+          report(channel.id!, currentUrl, 'failure', Math.max(0, Math.round(performance.now() - startedAt)), mediaError ? `MediaError ${mediaError.code} after recovery` : 'HTMLMediaElement error after recovery grace');
         }, FREEZE_RECOVERY_MS);
       }, FAILURE_GRACE_MS);
     };
 
     const attach = () => {
       const video = findVideo();
-      if (!video) return;
+      if (!video || video === attachedVideo) return;
+      detach(attachedVideo);
+      attachedVideo = video;
       video.addEventListener('loadstart', onLoadStart);
       video.addEventListener('playing', onPlaying);
       video.addEventListener('timeupdate', onProgress);
@@ -208,7 +212,8 @@ export default function StreamHealthObserver({ channel }: Props) {
 
     attach();
     timer = window.setInterval(() => {
-      const video = findVideo();
+      attach();
+      const video = attachedVideo;
       if (!video) return;
       if (video.currentSrc) syncCurrentSource();
       if (video.paused || video.ended || successReported || failureReported || !currentUrl) return;
@@ -230,15 +235,7 @@ export default function StreamHealthObserver({ channel }: Props) {
       clearFailureTimer();
       clearFreezeTimer();
       observer.disconnect();
-      const video = findVideo();
-      video?.removeEventListener('loadstart', onLoadStart);
-      video?.removeEventListener('playing', onPlaying);
-      video?.removeEventListener('timeupdate', onProgress);
-      video?.removeEventListener('progress', onProgress);
-      video?.removeEventListener('canplay', onProgress);
-      video?.removeEventListener('waiting', onWaiting);
-      video?.removeEventListener('stalled', onWaiting);
-      video?.removeEventListener('error', onError);
+      detach(attachedVideo);
     };
   }, [channel?.id]);
 
