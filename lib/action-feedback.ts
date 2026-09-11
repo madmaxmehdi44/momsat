@@ -8,10 +8,20 @@ export type ActionFeedbackPayload = {
   detail?: string;
 };
 
+export type ActionRunOptions = {
+  label?: string;
+  detail?: string;
+  dedupe?: boolean;
+  silent?: boolean;
+};
+
 const ACTION_EVENT = 'momsat-action-feedback';
+const PIPELINE_INSTALLED = '__momsatActionPipelineInstalled';
+const inflight = new Map<string, Promise<unknown>>();
 
 export function emitActionFeedback(payload: ActionFeedbackPayload) {
   if (typeof window === 'undefined') return;
+  if ((payload as ActionFeedbackPayload & { silent?: boolean }).silent) return;
   window.dispatchEvent(new CustomEvent<ActionFeedbackPayload>(ACTION_EVENT, { detail: payload }));
 }
 
@@ -27,11 +37,101 @@ export function failAction(id: string, detail = 'عملیات انجام نشد'
   emitActionFeedback({ id, label: '', status: 'error', detail });
 }
 
+export async function runAction<T>(id: string, task: () => Promise<T>, options: ActionRunOptions = {}): Promise<T> {
+  const existing = inflight.get(id);
+  if (existing && options.dedupe !== false) return existing as Promise<T>;
+
+  const label = options.label || 'در حال انجام عملیات';
+  startAction(id, label);
+  const promise = Promise.resolve().then(task);
+  inflight.set(id, promise);
+
+  try {
+    const result = await promise;
+    finishAction(id, options.detail);
+    return result;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error || 'عملیات انجام نشد');
+    failAction(id, detail);
+    throw error;
+  } finally {
+    if (inflight.get(id) === promise) inflight.delete(id);
+  }
+}
+
+export function isActionRunning(id: string) {
+  return inflight.has(id);
+}
+
 export function subscribeActionFeedback(listener: (payload: ActionFeedbackPayload) => void) {
   if (typeof window === 'undefined') return () => undefined;
   const handler = (event: Event) => listener((event as CustomEvent<ActionFeedbackPayload>).detail);
   window.addEventListener(ACTION_EVENT, handler);
   return () => window.removeEventListener(ACTION_EVENT, handler);
+}
+
+function requestLabel(url: string, method: string) {
+  const path = (() => { try { return new URL(url, window.location.href).pathname; } catch { return url; } })();
+  if (path.startsWith('/api/admin/')) return method === 'GET' ? 'در حال دریافت اطلاعات مدیریت' : 'در حال اجرای عملیات مدیریت';
+  if (path === '/api/catalog') return 'در حال دریافت کاتالوگ شبکه‌ها';
+  if (path.includes('/api/channel')) return 'در حال دریافت اطلاعات شبکه';
+  if (path.includes('/api/stream')) return '';
+  return method === 'GET' ? 'در حال دریافت اطلاعات' : 'در حال پردازش درخواست';
+}
+
+export function installGlobalActionPipeline() {
+  if (typeof window === 'undefined') return () => undefined;
+  const target = window as Window & { [PIPELINE_INSTALLED]?: boolean; __momsatOriginalFetch?: typeof window.fetch; __momsatOriginalOpen?: typeof XMLHttpRequest.prototype.open; __momsatOriginalSend?: typeof XMLHttpRequest.prototype.send };
+  if (target[PIPELINE_INSTALLED]) return () => undefined;
+  target[PIPELINE_INSTALLED] = true;
+
+  const originalFetch = window.fetch.bind(window);
+  target.__momsatOriginalFetch = originalFetch;
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const method = String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    const url = input instanceof Request ? input.url : String(input);
+    const label = requestLabel(url, method);
+    if (!label) return originalFetch(input, init);
+
+    const key = `${method}:${url}`;
+    if ((method === 'GET' || method === 'HEAD') && inflight.has(key)) return inflight.get(key) as Promise<Response>;
+    return runAction(key, () => originalFetch(input, init), { label, dedupe: method === 'GET' || method === 'HEAD' });
+  }) as typeof window.fetch;
+
+  const originalOpen = XMLHttpRequest.prototype.open;
+  const originalSend = XMLHttpRequest.prototype.send;
+  target.__momsatOriginalOpen = originalOpen;
+  target.__momsatOriginalSend = originalSend;
+
+  XMLHttpRequest.prototype.open = function(method: string, url: string | URL, ...rest: any[]) {
+    (this as XMLHttpRequest & { __momsatMethod?: string; __momsatUrl?: string }).__momsatMethod = method.toUpperCase();
+    (this as XMLHttpRequest & { __momsatMethod?: string; __momsatUrl?: string }).__momsatUrl = String(url);
+    return originalOpen.call(this, method, url, ...rest);
+  };
+
+  XMLHttpRequest.prototype.send = function(...args: any[]) {
+    const xhr = this as XMLHttpRequest & { __momsatMethod?: string; __momsatUrl?: string; __momsatActionId?: string };
+    const method = xhr.__momsatMethod || 'GET';
+    const url = xhr.__momsatUrl || '';
+    const label = requestLabel(url, method);
+    if (!label) return originalSend.apply(this, args as any);
+
+    const id = `xhr:${method}:${url}`;
+    xhr.__momsatActionId = id;
+    startAction(id, label);
+    xhr.addEventListener('loadend', () => {
+      if (xhr.status >= 200 && xhr.status < 400) finishAction(id);
+      else failAction(id, `درخواست با وضعیت ${xhr.status || 'نامشخص'} پایان یافت`);
+    }, { once: true });
+    return originalSend.apply(this, args as any);
+  };
+
+  return () => {
+    if (target.__momsatOriginalFetch) window.fetch = target.__momsatOriginalFetch;
+    if (target.__momsatOriginalOpen) XMLHttpRequest.prototype.open = target.__momsatOriginalOpen;
+    if (target.__momsatOriginalSend) XMLHttpRequest.prototype.send = target.__momsatOriginalSend;
+    delete target[PIPELINE_INSTALLED];
+  };
 }
 
 export const ACTION_FEEDBACK_EVENT = ACTION_EVENT;
