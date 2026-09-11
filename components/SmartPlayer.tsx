@@ -110,11 +110,6 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     });
   }, [allSources, verified, channel, setActiveChannel]);
 
-  useEffect(() => {
-    if (!expanded) return;
-    return () => registerPlayerHost(null);
-  }, [expanded, registerPlayerHost]);
-
   if (allSources.length > 0) {
     if (expanded) return <div ref={registerPlayerHost} className={styles.playerHost} aria-label="محل پخش زنده" />;
     return <div className={styles.persistentNotice}>پلیر هوشمند در پایین صفحه فعال است و با جابه‌جایی بین صفحات قطع نمی‌شود.</div>;
