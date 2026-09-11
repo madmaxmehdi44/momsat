@@ -5,217 +5,29 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const PRIVATE_HOST_PATTERNS = [
-  /^localhost$/i,
-  /^127\./,
-  /^0\.0\.0\.0$/,
-  /^10\./,
-  /^192\.168\./,
-  /^169\.254\./,
-  /^172\.(1[6-9]|2\d|3[0-1])\./,
-  /^::1$/i,
-  /^fc[0-9a-f]{2}:/i,
-  /^fd[0-9a-f]{2}:/i,
-  /^fe80:/i,
-];
+const PRIVATE_HOST_PATTERNS = [/^localhost$/i, /^127\./, /^0\.0\.0\.0$/, /^10\./, /^192\.168\./, /^169\.254\./, /^172\.(1[6-9]|2\d|3[0-1])\./, /^::1$/i, /^fc[0-9a-f]{2}:/i, /^fd[0-9a-f]{2}:/i, /^fe80:/i];
+function isPrivateIp(value: string) { const version = net.isIP(value); if (version === 4) { const [a,b]=value.split('.').map(Number); return a===10||a===127||a===0||(a===169&&b===254)||(a===192&&b===168)||(a===172&&b>=16&&b<=31); } if(version===6){const n=value.toLowerCase();return n==='::1'||n==='::'||n.startsWith('fc')||n.startsWith('fd')||n.startsWith('fe80:');} return false; }
+async function isAllowedTarget(raw: string) { let parsed:URL; try{parsed=new URL(raw);}catch{return false;} if(!/^https?:$/i.test(parsed.protocol))return false; const hostname=parsed.hostname.replace(/^\[|\]$/g,'').toLowerCase(); if(!hostname||hostname.endsWith('.local')||PRIVATE_HOST_PATTERNS.some(p=>p.test(hostname)))return false; if(net.isIP(hostname))return !isPrivateIp(hostname); try{const records=await dns.lookup(hostname,{all:true});return records.length>0&&records.every(r=>!isPrivateIp(r.address));}catch{return false;} }
+function envInt(name:string,fallback:number,min:number,max:number){const parsed=Number(process.env[name]);return Number.isFinite(parsed)?Math.min(max,Math.max(min,Math.floor(parsed))):fallback;}
+function getUpstreamFallbacks(initialUrl:string){const fallbacks:string[]=[];try{const parsed=new URL(initialUrl);if(!parsed.hostname.toLowerCase().endsWith('.akamaized.net'))return fallbacks;const originalPath=parsed.pathname;const normalizedPath=originalPath.replace(/\/hls\/live\/(\d+)-b\//i,'/hls/live/$1/');if(normalizedPath!==originalPath){const normalized=new URL(parsed.toString());normalized.pathname=normalizedPath;fallbacks.push(normalized.toString());}const basePath=normalizedPath!==originalPath?normalizedPath:originalPath;const masterPath=basePath.replace(/\/playlist_\d+\.m3u8$/i,'/playlist.m3u8');if(masterPath!==basePath){const master=new URL(parsed.toString());master.pathname=masterPath;fallbacks.push(master.toString());}}catch{}return Array.from(new Set(fallbacks));}
+async function fetchSafe(initialUrl:string,headers:Headers){let target=initialUrl;for(let redirectCount=0;redirectCount<=5;redirectCount+=1){if(!(await isAllowedTarget(target)))throw new Error('Blocked stream target');const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),envInt('STREAM_PROXY_TIMEOUT_MS',20000,3000,60000));try{const response=await fetch(target,{headers,cache:'no-store',redirect:'manual',signal:controller.signal});if(![301,302,303,307,308].includes(response.status))return response;const location=response.headers.get('location');if(!location)throw new Error('Redirect without location');target=new URL(location,target).toString();}finally{clearTimeout(timer);}}throw new Error('Too many redirects');}
+function proxyUrl(target:string,referer:string|null,origin:string|null){const params=new URLSearchParams({url:target});if(referer)params.set('referer',referer);if(origin)params.set('origin',origin);return `/api/stream?${params.toString()}`;}
+function rewritePlaylist(text:string,baseUrl:string,referer:string|null,origin:string|null){const rewrite=(candidate:string)=>{try{return proxyUrl(new URL(candidate,baseUrl).toString(),referer,origin);}catch{return candidate;}};let output=text.replace(/URI=("?)([^",\s]+)\1/gi,(_m,q,v)=>`URI=${q}${rewrite(v)}${q}`);return output.split(/\r?\n/).map(line=>{const value=line.trim();if(!value||value.startsWith('#'))return line;return rewrite(value);}).join('\n');}
 
-function isPrivateIp(value: string) {
-  const version = net.isIP(value);
-  if (version === 4) {
-    const [a, b] = value.split('.').map(Number);
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
-  }
-  if (version === 6) {
-    const normalized = value.toLowerCase();
-    return normalized === '::1' || normalized === '::' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:');
-  }
-  return false;
+export async function GET(request:NextRequest){
+  const requestedTarget=request.nextUrl.searchParams.get('url')?.trim()??''; const referer=request.nextUrl.searchParams.get('referer')?.trim()||null; const origin=request.nextUrl.searchParams.get('origin')?.trim()||null;
+  if(!requestedTarget||!(await isAllowedTarget(requestedTarget)))return NextResponse.json({error:'Invalid or blocked stream URL.'},{status:400});
+  const baseHeaders=new Headers(); baseHeaders.set('user-agent',request.headers.get('user-agent')||'MomSatPlayer/1.0'); baseHeaders.set('accept','*/*'); baseHeaders.set('accept-encoding','identity'); const range=request.headers.get('range'); if(range)baseHeaders.set('range',range); if(referer&&await isAllowedTarget(referer))baseHeaders.set('referer',referer); if(origin){try{const parsedOrigin=new URL(origin);if(/^https?:$/i.test(parsedOrigin.protocol))baseHeaders.set('origin',parsedOrigin.origin);}catch{}}
+  try{
+    const candidates=[requestedTarget,...getUpstreamFallbacks(requestedTarget)]; let upstream:Response|null=null; let upstreamUrl=requestedTarget; const failures:string[]=[];
+    for(const candidate of candidates){for(const stripSiteHeaders of [false,true]){const headers=new Headers(baseHeaders);if(stripSiteHeaders){headers.delete('referer');headers.delete('origin');}const response=await fetchSafe(candidate,headers);upstream=response;upstreamUrl=response.url||candidate;if(response.ok||response.status===206)break;failures.push(`${candidate}${stripSiteHeaders?' [no-site-headers]':''} -> ${response.status}`);if(![401,403,404,410,429,500,502,503,504].includes(response.status))break;}if(upstream&&(upstream.ok||upstream.status===206))break;}
+    if(!upstream)throw new Error('No upstream response'); if(!upstream.ok&&upstream.status!==206)return NextResponse.json({error:`Upstream returned ${upstream.status}.`,upstream:failures},{status:502});
+    const contentType=upstream.headers.get('content-type')||''; const finalUrl=upstreamUrl; const isPlaylist=/(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl)/i.test(contentType)||/\.m3u8(?:$|[?#])/i.test(finalUrl);
+    if(isPlaylist){const text=await upstream.text();if(/^\s*#EXTM3U\b/i.test(text)||isPlaylist){const body=rewritePlaylist(text,finalUrl,referer,origin);return new NextResponse(body,{status:upstream.status,headers:{'content-type':'application/vnd.apple.mpegurl; charset=utf-8','cache-control':'no-store, no-cache, must-revalidate','pragma':'no-cache','access-control-allow-origin':'*','access-control-allow-headers':'*','x-momsat-accelerator':'hls-proxy-v1'}});}}
+    const responseHeaders=new Headers(); for(const name of ['content-type','content-length','content-range','accept-ranges','etag','last-modified']){const value=upstream.headers.get(name);if(value)responseHeaders.set(name,value);}
+    const isSegment=/\.(?:ts|m4s|cmfv|cmfa|aac)(?:$|[?#])/i.test(finalUrl)||/video\/(?:mp2t|iso.segment)/i.test(contentType);
+    responseHeaders.set('cache-control',isSegment?'public, max-age=8, s-maxage=8, stale-while-revalidate=4':'public, max-age=3, s-maxage=3'); responseHeaders.set('pragma',''); responseHeaders.set('access-control-allow-origin','*'); responseHeaders.set('access-control-allow-headers','*'); responseHeaders.set('access-control-expose-headers','Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified'); responseHeaders.set('x-momsat-accelerator',isSegment?'hls-segment-cache-v1':'media-proxy-v1');
+    return new NextResponse(upstream.body,{status:upstream.status,headers:responseHeaders});
+  }catch(error){console.error('[stream-proxy]',error);return NextResponse.json({error:error instanceof Error?error.message:'Unable to reach the stream source.'},{status:502});}
 }
-
-async function isAllowedTarget(raw: string) {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (!/^https?:$/i.test(parsed.protocol)) return false;
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (!hostname || hostname.endsWith('.local') || PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(hostname))) return false;
-  if (net.isIP(hostname)) return !isPrivateIp(hostname);
-  try {
-    const records = await dns.lookup(hostname, { all: true });
-    return records.length > 0 && records.every((record) => !isPrivateIp(record.address));
-  } catch {
-    return false;
-  }
-}
-
-function envInt(name: string, fallback: number, min: number, max: number) {
-  const parsed = Number(process.env[name]);
-  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.floor(parsed))) : fallback;
-}
-
-function getUpstreamFallbacks(initialUrl: string) {
-  const fallbacks: string[] = [];
-  try {
-    const parsed = new URL(initialUrl);
-    if (!parsed.hostname.toLowerCase().endsWith('.akamaized.net')) return fallbacks;
-    const originalPath = parsed.pathname;
-    const normalizedPath = originalPath.replace(/\/hls\/live\/(\d+)-b\//i, '/hls/live/$1/');
-    if (normalizedPath !== originalPath) {
-      const normalized = new URL(parsed.toString());
-      normalized.pathname = normalizedPath;
-      fallbacks.push(normalized.toString());
-    }
-    const basePath = normalizedPath !== originalPath ? normalizedPath : originalPath;
-    const masterPath = basePath.replace(/\/playlist_\d+\.m3u8$/i, '/playlist.m3u8');
-    if (masterPath !== basePath) {
-      const master = new URL(parsed.toString());
-      master.pathname = masterPath;
-      fallbacks.push(master.toString());
-    }
-  } catch {
-    // Invalid URLs are rejected by isAllowedTarget before this function is used.
-  }
-  return Array.from(new Set(fallbacks));
-}
-
-async function fetchSafe(initialUrl: string, headers: Headers) {
-  let target = initialUrl;
-  for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
-    if (!(await isAllowedTarget(target))) throw new Error('Blocked stream target');
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), envInt('STREAM_PROXY_TIMEOUT_MS', 20000, 3000, 60000));
-    try {
-      const response = await fetch(target, { headers, cache: 'no-store', redirect: 'manual', signal: controller.signal });
-      if (![301, 302, 303, 307, 308].includes(response.status)) return response;
-      const location = response.headers.get('location');
-      if (!location) throw new Error('Redirect without location');
-      target = new URL(location, target).toString();
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw new Error('Too many redirects');
-}
-
-function proxyUrl(target: string, referer: string | null, origin: string | null) {
-  const params = new URLSearchParams({ url: target });
-  if (referer) params.set('referer', referer);
-  if (origin) params.set('origin', origin);
-  return `/api/stream?${params.toString()}`;
-}
-
-function rewritePlaylist(text: string, baseUrl: string, referer: string | null, origin: string | null) {
-  const rewrite = (candidate: string) => {
-    try {
-      const resolved = new URL(candidate, baseUrl).toString();
-      return proxyUrl(resolved, referer, origin);
-    } catch {
-      return candidate;
-    }
-  };
-  let output = text.replace(/URI=("?)([^",\s]+)\1/gi, (_match, quote, value) => `URI=${quote}${rewrite(value)}${quote}`);
-  output = output.split(/\r?\n/).map((line) => {
-    const value = line.trim();
-    if (!value || value.startsWith('#')) return line;
-    return rewrite(value);
-  }).join('\n');
-  return output;
-}
-
-export async function GET(request: NextRequest) {
-  const requestedTarget = request.nextUrl.searchParams.get('url')?.trim() ?? '';
-  const referer = request.nextUrl.searchParams.get('referer')?.trim() || null;
-  const origin = request.nextUrl.searchParams.get('origin')?.trim() || null;
-  if (!requestedTarget || !(await isAllowedTarget(requestedTarget))) return NextResponse.json({ error: 'Invalid or blocked stream URL.' }, { status: 400 });
-
-  const baseHeaders = new Headers();
-  baseHeaders.set('user-agent', request.headers.get('user-agent') || 'MomSatPlayer/1.0');
-  baseHeaders.set('accept', '*/*');
-  baseHeaders.set('accept-encoding', 'identity');
-  const range = request.headers.get('range');
-  if (range) baseHeaders.set('range', range);
-  if (referer && await isAllowedTarget(referer)) baseHeaders.set('referer', referer);
-  if (origin) {
-    try {
-      const parsedOrigin = new URL(origin);
-      if (/^https?:$/i.test(parsedOrigin.protocol)) baseHeaders.set('origin', parsedOrigin.origin);
-    } catch {
-      // Ignore malformed Origin values.
-    }
-  }
-
-  try {
-    const candidates = [requestedTarget, ...getUpstreamFallbacks(requestedTarget)];
-    let upstream: Response | null = null;
-    let upstreamUrl = requestedTarget;
-    const failures: string[] = [];
-
-    for (const candidate of candidates) {
-      for (const stripSiteHeaders of [false, true]) {
-        const headers = new Headers(baseHeaders);
-        if (stripSiteHeaders) {
-          headers.delete('referer');
-          headers.delete('origin');
-        }
-        const response = await fetchSafe(candidate, headers);
-        upstream = response;
-        upstreamUrl = response.url || candidate;
-        if (response.ok || response.status === 206) break;
-        failures.push(`${candidate}${stripSiteHeaders ? ' [no-site-headers]' : ''} -> ${response.status}`);
-        if (![401, 403, 404, 410, 429, 500, 502, 503, 504].includes(response.status)) break;
-      }
-      if (upstream && (upstream.ok || upstream.status === 206)) break;
-    }
-
-    if (!upstream) throw new Error('No upstream response');
-    if (!upstream.ok && upstream.status !== 206) {
-      const detail = failures.length ? ` Upstream: ${failures.join(' | ')}` : ` Upstream: ${upstream.status}`;
-      console.error(`[stream-proxy] ${requestedTarget}${detail}`);
-      return NextResponse.json({ error: `Upstream returned ${upstream.status}.`, upstream: failures }, { status: 502 });
-    }
-
-    const contentType = upstream.headers.get('content-type') || '';
-    const finalUrl = upstreamUrl;
-    const isPlaylistByType = /(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl)/i.test(contentType) || /\.m3u8(?:$|[?#])/i.test(finalUrl);
-    if (isPlaylistByType) {
-      const text = await upstream.text();
-      const isPlaylistByBody = /^\s*#EXTM3U\b/i.test(text);
-      if (isPlaylistByBody || isPlaylistByType) {
-        const body = rewritePlaylist(text, finalUrl, referer, origin);
-        return new NextResponse(body, { status: upstream.status, headers: {
-          'content-type': 'application/vnd.apple.mpegurl; charset=utf-8',
-          'cache-control': 'no-store, no-cache, must-revalidate',
-          'pragma': 'no-cache',
-          'access-control-allow-origin': '*',
-          'access-control-allow-headers': '*',
-        }});
-      }
-    }
-
-    const responseHeaders = new Headers();
-    for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified']) {
-      const value = upstream.headers.get(name);
-      if (value) responseHeaders.set(name, value);
-    }
-    responseHeaders.set('cache-control', 'no-store, no-cache, must-revalidate');
-    responseHeaders.set('pragma', 'no-cache');
-    responseHeaders.set('access-control-allow-origin', '*');
-    responseHeaders.set('access-control-allow-headers', '*');
-    responseHeaders.set('access-control-expose-headers', 'Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified');
-    return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
-  } catch (error) {
-    console.error('[stream-proxy]', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to reach the stream source.' }, { status: 502 });
-  }
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: {
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET, OPTIONS',
-    'access-control-allow-headers': '*',
-  }});
-}
+export async function OPTIONS(){return new NextResponse(null,{status:204,headers:{'access-control-allow-origin':'*','access-control-allow-methods':'GET, OPTIONS','access-control-allow-headers':'*'}});}
