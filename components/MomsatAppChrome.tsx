@@ -34,20 +34,36 @@ export default function MomsatAppChrome({ children }: Props) {
   }, [open]);
 
   useEffect(() => {
+    if (browsePage) return;
+
     let alive = true;
+    let timer: number | undefined;
+    let requestTimer: number | undefined;
+
     const load = async () => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 1500);
       try {
-        const response = await fetch('/api/health', { cache: 'no-store' });
+        const response = await fetch('/api/health', { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) throw new Error(`health:${response.status}`);
         const body = await response.json() as Health;
         if (alive) setHealth(body);
       } catch {
-        if (alive) setHealth({ ok: false });
+        if (alive) setHealth((current) => current ?? { ok: false });
+      } finally {
+        window.clearTimeout(timeout);
       }
     };
-    void load();
-    const timer = window.setInterval(load, 30_000);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, []);
+
+    requestTimer = window.setTimeout(() => { void load(); }, 500);
+    timer = window.setInterval(() => { void load(); }, 30_000);
+
+    return () => {
+      alive = false;
+      if (requestTimer !== undefined) window.clearTimeout(requestTimer);
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [browsePage]);
 
   useEffect(() => subscribeActionFeedback((payload) => {
     setLastAction(payload);
@@ -97,7 +113,7 @@ export default function MomsatAppChrome({ children }: Props) {
       <aside className={styles.sidebar}>
         <nav className={styles.nav}>
           {navItems.map(([href, label, Icon], index) => <div key={`${href}-${index}`} className={styles.navWrap}>
-            {index === 0 || index === 3 || index === 4 ? <Link className={`${styles.navItem}${activePath(pathname, href.split('?')[0]) ? ` ${styles.active}` : ''}`} href={href}><Icon size={19} /><span>{label}</span></Link> : <Link className={`${styles.navItem}${activePath(pathname, href.split('?')[0]) ? ` ${styles.active}` : ''}`} href={href}><Icon size={19} /><span>{label}</span></Link>}
+            <Link className={`${styles.navItem}${activePath(pathname, href.split('?')[0]) ? ` ${styles.active}` : ''}`} href={href}><Icon size={19} /><span>{label}</span></Link>
             {index === 2 || index === 4 ? <div className={styles.divider} /> : null}
           </div>)}
         </nav>
