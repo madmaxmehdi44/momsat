@@ -49,7 +49,7 @@ async function captureSnapshot(channel: Channel): Promise<{ dataUrl: string; sou
     video.muted = true; video.playsInline = true; video.preload = 'auto';
     video.style.cssText = 'position:fixed;width:2px;height:2px;left:-10000px;top:-10000px;opacity:0;pointer-events:none;';
     document.body.appendChild(video);
-    let destroyHls: (() => void) | null = null;
+    const hlsCleanup: Array<() => void> = [];
     try {
       const loaded = await new Promise<boolean>((resolve) => {
         let settled = false;
@@ -61,7 +61,7 @@ async function captureSnapshot(channel: Channel): Promise<{ dataUrl: string; sou
         if (/\.m3u8(?:$|[?#])/i.test(url)) {
           if (Hls.isSupported()) {
             const hls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 8, maxBufferLength: 7, maxMaxBufferLength: 12, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 1, manifestLoadingTimeOut: 4500, levelLoadingTimeOut: 4500, fragLoadingTimeOut: 5000 });
-            destroyHls = () => hls.destroy();
+            hlsCleanup.push(() => hls.destroy());
             hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) finish(false); });
             hls.loadSource(url); hls.attachMedia(video);
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = url;
@@ -82,7 +82,7 @@ async function captureSnapshot(channel: Channel): Promise<{ dataUrl: string; sou
     } catch {
       // Try another source.
     } finally {
-      try { destroyHls?.(); } catch {}
+      for (const destroy of hlsCleanup) { try { destroy(); } catch {} }
       video.pause(); video.removeAttribute('src'); video.load(); video.remove();
     }
   }
