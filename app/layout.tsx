@@ -1,4 +1,5 @@
 import './globals.css';
+import BrowserCompatibility from '../components/BrowserCompatibility';
 import InteractionFeedback from '../components/InteractionFeedback';
 import PersistentPlayerProvider from '../components/PersistentPlayerProvider';
 
@@ -11,6 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="fa" dir="rtl">
       <body>
+        <BrowserCompatibility />
         <PersistentPlayerProvider>
           {children}
         </PersistentPlayerProvider>
