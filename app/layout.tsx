@@ -1,4 +1,5 @@
 import './globals.css';
+import InteractionFeedback from '../components/InteractionFeedback';
 
 export const metadata = {
   title: 'MOMSAT — Persian Live TV',
@@ -8,7 +9,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fa" dir="rtl">
-      <body>{children}</body>
+      <body>
+        {children}
+        <InteractionFeedback />
+      </body>
     </html>
   );
 }
