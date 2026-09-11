@@ -5,6 +5,8 @@ import type { PersistentChannel } from './PersistentPlayerProvider';
 
 type Props = { channel: PersistentChannel | null };
 
+const FAILURE_GRACE_MS = 8000;
+
 function sourceFromCurrentSrc(currentSrc: string) {
   if (!currentSrc) return '';
   try {
@@ -34,14 +36,23 @@ export default function StreamHealthObserver({ channel }: Props) {
     let failureReported = false;
     let successReported = false;
     let timer: number | null = null;
+    let failureTimer: number | null = null;
 
     const findVideo = () => document.querySelector('.persistent-player-host video, .player-pro-shell video, video.pro-player-video') as HTMLVideoElement | null;
+
+    const clearFailureTimer = () => {
+      if (failureTimer != null) {
+        window.clearTimeout(failureTimer);
+        failureTimer = null;
+      }
+    };
 
     const syncCurrentSource = () => {
       const video = findVideo();
       if (!video) return null;
       const nextUrl = sourceFromCurrentSrc(video.currentSrc || video.getAttribute('src') || '');
       if (nextUrl && nextUrl !== currentUrl) {
+        clearFailureTimer();
         currentUrl = nextUrl;
         startedAt = performance.now();
         failureReported = false;
@@ -50,19 +61,44 @@ export default function StreamHealthObserver({ channel }: Props) {
       return video;
     };
 
-    const onLoadStart = () => { syncCurrentSource(); };
+    const onLoadStart = () => {
+      clearFailureTimer();
+      syncCurrentSource();
+    };
+
     const onPlaying = () => {
       const video = syncCurrentSource();
-      if (!video || !currentUrl || successReported) return;
+      if (!video || !currentUrl) return;
+      clearFailureTimer();
+      if (successReported) return;
       successReported = true;
       report(channel.id!, currentUrl, 'success', Math.max(0, Math.round(performance.now() - startedAt)));
     };
+
     const onError = () => {
       const video = syncCurrentSource();
-      if (!video || !currentUrl || failureReported) return;
-      failureReported = true;
-      const mediaError = video.error;
-      report(channel.id!, currentUrl, 'failure', Math.max(0, Math.round(performance.now() - startedAt)), mediaError ? `MediaError ${mediaError.code}` : 'HTMLMediaElement error');
+      if (!video || !currentUrl || failureReported || successReported) return;
+      clearFailureTimer();
+      failureTimer = window.setTimeout(() => {
+        failureTimer = null;
+        const latest = syncCurrentSource();
+        if (!latest || successReported || failureReported || !currentUrl) return;
+
+        const stillBroken = latest.error != null
+          && latest.paused
+          && latest.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        if (!stillBroken) return;
+
+        failureReported = true;
+        const mediaError = latest.error;
+        report(
+          channel.id!,
+          currentUrl,
+          'failure',
+          Math.max(0, Math.round(performance.now() - startedAt)),
+          mediaError ? `MediaError ${mediaError.code}` : 'HTMLMediaElement error after recovery grace',
+        );
+      }, FAILURE_GRACE_MS);
     };
 
     const attach = () => {
@@ -86,6 +122,7 @@ export default function StreamHealthObserver({ channel }: Props) {
 
     return () => {
       if (timer != null) window.clearInterval(timer);
+      clearFailureTimer();
       observer.disconnect();
       const video = findVideo();
       video?.removeEventListener('loadstart', onLoadStart);
