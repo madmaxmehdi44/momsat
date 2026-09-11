@@ -12,6 +12,14 @@ enum ChannelArchiveStatus {
   SHUTDOWN
 }
 
+enum StreamHealthStatus {
+  UNKNOWN
+  HEALTHY
+  SUSPECT
+  BROKEN
+  ARCHIVED
+}
+
 model Category {
   id       Int       @id
   name     String
@@ -49,6 +57,7 @@ model Channel {
   category        Category  @relation(fields: [categoryId], references: [id])
   sources         Source[]
   programs        Program[]
+  streamHealth    StreamHealth[]
   updatedAt       DateTime  @updatedAt
   createdAt       DateTime  @default(now())
 
@@ -73,6 +82,32 @@ model Source {
 
   @@index([channelId])
   @@index([url])
+}
+
+model StreamHealth {
+  id                  Int                @id @default(autoincrement())
+  channelId           Int
+  url                 String
+  status              StreamHealthStatus  @default(UNKNOWN)
+  successCount        Int                @default(0)
+  failureCount        Int                @default(0)
+  failureStreak       Int                @default(0)
+  lastCheckedAt       DateTime?
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  lastLatencyMs       Int?
+  averageLatencyMs    Int?
+  lastError           String?
+  disabledAt          DateTime?
+  disabledReason      String?
+  updatedAt           DateTime           @updatedAt
+  createdAt           DateTime           @default(now())
+  channel             Channel            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, url])
+  @@index([status, failureStreak])
+  @@index([channelId, status])
+  @@index([lastFailureAt])
 }
 
 model EpgChannel {
