@@ -1,7 +1,7 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { NextRequest, NextResponse } from 'next/server';
-import { ttlGetOrSet } from '../../../../lib/ttl-cache';
+import { redisGetOrSet } from '../../../../lib/redis-cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,11 +26,7 @@ function isPrivateIp(value: string) {
 
 async function assertSafeTarget(raw: string) {
   let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new Error('Invalid URL');
-  }
+  try { parsed = new URL(raw); } catch { throw new Error('Invalid URL'); }
   if (!/^https?:$/i.test(parsed.protocol)) throw new Error('Only HTTP(S) URLs are allowed');
   const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!hostname || hostname.endsWith('.local') || (net.isIP(hostname) && isPrivateIp(hostname))) throw new Error('Blocked target');
@@ -46,9 +42,7 @@ function publicOrigin(raw: string) {
     const parsed = new URL(raw);
     if (!/^https?:$/i.test(parsed.protocol)) return null;
     return parsed.origin;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function fetchSafeText(url: string, headers: Headers, signal: AbortSignal) {
@@ -124,9 +118,9 @@ export async function GET(request: NextRequest) {
   const origin = request.nextUrl.searchParams.get('origin')?.trim() || '';
   if (!target) return NextResponse.json({ ok: false, playable: false, error: 'Missing url' }, { status: 400 });
 
-  const cacheKey = `momsat:probe:v3:${target}|${referer}|${origin}`;
+  const cacheKey = `stream-probe:v3:${target}|${referer}|${origin}`;
   try {
-    const result = await ttlGetOrSet(cacheKey, PROBE_TTL_MS, async () => {
+    const result = await redisGetOrSet(cacheKey, PROBE_TTL_MS, async () => {
       const started = Date.now();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -261,6 +255,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'cache-control': 'public, s-maxage=15, stale-while-revalidate=30',
         'access-control-allow-origin': '*',
+        'x-momsat-cache': 'redis-metadata-v1',
       },
     });
   } catch (error) {
