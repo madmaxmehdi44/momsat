@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
 import { updateStreamHealth } from '../../../../lib/stream-health';
 import { probeStream, type StreamProbeResult } from '../../../../lib/stream-probe';
+import { ttlDelete } from '../../../../lib/ttl-cache';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,7 +43,6 @@ export async function POST(req: NextRequest) {
       const sources = channel.sources.length ? channel.sources : [{ id: null, title: null, url: channel.url, referer: channel.referer, origin: channel.origin, vip: false }];
       for (const source of sources) if (!requestedUrls.size || requestedUrls.has(source.url.trim())) jobs.push({ channelId: channel.id, channelName: channel.name, url: source.url.trim(), referer: source.referer ?? channel.referer, origin: source.origin ?? channel.origin });
     }
-
     const results: Array<StreamProbeResult & { channelId: number; channelName: string }> = [];
     const concurrency = Math.min(4, Math.max(1, Number(process.env.STREAM_PROBE_CONCURRENCY) || 4));
     let cursor = 0;
@@ -70,6 +70,7 @@ export async function PATCH(req: NextRequest) {
     if (body.verdict !== 'HEALTHY') return NextResponse.json({ ok: false, error: 'Only a verified HEALTHY stream can be activated.' }, { status: 400 });
     const stream = await updateStreamHealth({ channelId, url, status: 'HEALTHY', reason: typeof body.reason === 'string' ? body.reason : 'فعال‌سازی پس از صحت‌سنجی زنده توسط ادمین' });
     await prisma.channel.updateMany({ where: { id: channelId }, data: { archiveStatus: null, archiveNote: null, archiveSince: null, url } });
-    return NextResponse.json({ ok: true, stream, activated: true });
+    ttlDelete('momsat:catalog:v5:database-first-health-ranked');
+    return NextResponse.json({ ok: true, stream, activated: true, playlistReady: true });
   } catch (error) { return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Could not activate stream' }, { status: 500 }); }
 }
