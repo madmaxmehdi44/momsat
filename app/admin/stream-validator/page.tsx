@@ -32,7 +32,7 @@ export default function StreamValidatorPage() {
     try { setToken(localStorage.getItem(TOKEN_KEY) || ''); } catch {}
   }, []);
 
-  const headers = () => token.trim() ? { 'x-admin-token': token.trim() } : {};
+  const headers = (): Record<string, string> => token.trim() ? { 'x-admin-token': token.trim() } : {};
 
   async function load() {
     setLoading(true); setError('');
