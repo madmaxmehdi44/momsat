@@ -1,7 +1,8 @@
 import { prisma } from './prisma';
+import type { StreamHealthStatus as PrismaStreamHealthStatus } from '@prisma/client';
 import type { Channel } from './source';
 
-export type StreamHealthStatus = 'UNKNOWN' | 'HEALTHY' | 'SUSPECT' | 'BROKEN' | 'ARCHIVED';
+export type StreamHealthStatus = PrismaStreamHealthStatus;
 
 type HealthRecord = {
   channelId: number;
@@ -88,6 +89,36 @@ export async function applyStreamHealth(channels: Channel[]) {
     .filter((channel) => channel.sources.length > 0 && channel.url);
 }
 
+async function quarantineChannelIfAllSourcesBroken(channelId: number) {
+  if (!process.env.DATABASE_URL?.trim()) return;
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: {
+      archiveStatus: true,
+      url: true,
+      sources: { select: { url: true } },
+    },
+  });
+  if (!channel || channel.archiveStatus) return;
+
+  const urls = Array.from(new Set([channel.url, ...channel.sources.map((source) => source.url)].filter(Boolean).map(normalizeUrl)));
+  if (!urls.length) return;
+
+  const records = await prisma.streamHealth.findMany({ where: { channelId, url: { in: urls } }, select: { url: true, status: true } });
+  const statusByUrl = new Map(records.map((record) => [normalizeUrl(record.url), record.status]));
+  const allKnownBroken = urls.every((url) => statusByUrl.get(url) === 'BROKEN' || statusByUrl.get(url) === 'ARCHIVED');
+  if (!allKnownBroken) return;
+
+  await prisma.channel.update({
+    where: { id: channelId },
+    data: {
+      archiveStatus: 'SHUTDOWN',
+      archiveNote: 'Automatically removed from the active catalog because every registered stream path is quarantined.',
+      archiveSince: now(),
+    },
+  });
+}
+
 export async function reportStreamSuccess(input: {
   channelId: number;
   url: string;
@@ -137,6 +168,8 @@ export async function reportStreamSuccess(input: {
         lastError: null,
       },
     });
+
+    await prisma.channel.updateMany({ where: { id: input.channelId, archiveStatus: 'SHUTDOWN' }, data: { archiveStatus: null, archiveNote: null, archiveSince: null } });
   } catch (error) {
     console.warn('[stream-health] Failed to record success.', error);
   }
@@ -159,7 +192,7 @@ export async function reportStreamFailure(input: {
     if (existing?.status === 'ARCHIVED') return;
 
     const failureStreak = (existing?.failureStreak ?? 0) + 1;
-    const status = failureStreak >= BROKEN_STREAK ? 'BROKEN' : 'SUSPECT';
+    const status: StreamHealthStatus = failureStreak >= BROKEN_STREAK ? 'BROKEN' : 'SUSPECT';
     const latency = Number.isFinite(input.latencyMs) ? Math.max(0, Math.round(Number(input.latencyMs))) : null;
     const message = safeError(input.error);
 
@@ -171,7 +204,7 @@ export async function reportStreamFailure(input: {
         status,
         successCount: 0,
         failureCount: 1,
-        failureStreak: 1,
+        failureStreak,
         lastCheckedAt: checkedAt,
         lastFailureAt: checkedAt,
         lastLatencyMs: latency,
@@ -187,10 +220,12 @@ export async function reportStreamFailure(input: {
         lastFailureAt: checkedAt,
         lastLatencyMs: latency,
         lastError: message,
-        disabledAt: status === 'BROKEN' ? (existing.disabledAt ?? checkedAt) : existing.disabledAt,
-        disabledReason: status === 'BROKEN' ? (existing.disabledReason ?? 'Automatic health quarantine after repeated playback failures.') : existing.disabledReason,
+        disabledAt: status === 'BROKEN' ? (existing?.disabledAt ?? checkedAt) : existing?.disabledAt,
+        disabledReason: status === 'BROKEN' ? (existing?.disabledReason ?? 'Automatic health quarantine after repeated playback failures.') : existing?.disabledReason,
       },
     });
+
+    if (status === 'BROKEN') await quarantineChannelIfAllSourcesBroken(input.channelId);
   } catch (error) {
     console.warn('[stream-health] Failed to record failure.', error);
   }
@@ -213,7 +248,7 @@ export async function listProblemStreams() {
 export async function updateStreamHealth(input: {
   channelId: number;
   url: string;
-  status: 'UNKNOWN' | 'HEALTHY' | 'SUSPECT' | 'BROKEN' | 'ARCHIVED';
+  status: StreamHealthStatus;
   newUrl?: string | null;
   reason?: string | null;
 }) {
@@ -223,7 +258,13 @@ export async function updateStreamHealth(input: {
   const targetUrl = normalizeUrl(input.newUrl ?? '');
   const record = await prisma.streamHealth.upsert({
     where: { channelId_url: { channelId: input.channelId, url } },
-    create: { channelId: input.channelId, url, status: input.status, disabledAt: input.status === 'ARCHIVED' || input.status === 'BROKEN' ? now() : null, disabledReason: input.reason?.trim() || null },
+    create: {
+      channelId: input.channelId,
+      url,
+      status: input.status,
+      disabledAt: input.status === 'ARCHIVED' || input.status === 'BROKEN' ? now() : null,
+      disabledReason: input.reason?.trim() || null,
+    },
     update: {
       status: input.status,
       disabledAt: input.status === 'ARCHIVED' || input.status === 'BROKEN' ? now() : null,
@@ -243,6 +284,10 @@ export async function updateStreamHealth(input: {
       }
     }
     await prisma.streamHealth.update({ where: { id: record.id }, data: { url: targetUrl } });
+  }
+
+  if (input.status === 'HEALTHY') {
+    await prisma.channel.updateMany({ where: { id: input.channelId, archiveStatus: 'SHUTDOWN' }, data: { archiveStatus: null, archiveNote: null, archiveSince: null } });
   }
 
   return record;
