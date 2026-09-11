@@ -4,61 +4,32 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { BarChart3, Check, Maximize2, MonitorPlay, PictureInPicture2, RefreshCw, Settings2, Volume2, VolumeX, X } from 'lucide-react';
 import PlayerPro from './PlayerPro';
 import styles from './PlayerProEnhanced.module.css';
-import { loadAppSettings, subscribeAppSettings, type AppSettings } from '../lib/app-settings';
+import { DEFAULT_APP_SETTINGS, loadAppSettings, saveAppSettings, subscribeAppSettings, type AppSettings } from '../lib/app-settings';
 
-type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
-type Channel = { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
-type Fit = 'contain' | 'cover' | 'fill';
-type Preferences = { autoplay: boolean; mutedStart: boolean; playbackRate: number; fit: Fit; theater: boolean; showStats: boolean };
-const STORAGE_KEY = 'momsat.player-pro.preferences.v1';
-const DEFAULTS: Preferences = { autoplay: true, mutedStart: true, playbackRate: 1, fit: 'contain', theater: false, showStats: false };
-
-function loadPreferences(): Preferences {
-  if (typeof window === 'undefined') return DEFAULTS;
-  try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<Preferences>) }; } catch { return DEFAULTS; }
-}
-
-export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
+export default function PlayerProEnhanced({ channel }: { channel: { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Array<{ url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean }> } }) {
   const shellRef = useRef<HTMLDivElement>(null);
   const qualityApplyStarted = useRef(false);
-  const [preferences, setPreferences] = useState<Preferences>(DEFAULTS);
-  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [preferences, setPreferences] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [volume, setVolume] = useState(0.82);
-  const [muted, setMuted] = useState(true);
   const [stats, setStats] = useState({ resolution: '—', readyState: 0, buffered: 0, currentTime: 0 });
 
   useEffect(() => {
     const loaded = loadAppSettings();
     setAppSettings(loaded);
-    setPreferences((current) => ({
-      ...current,
-      autoplay: loaded.autoplay,
-      mutedStart: loaded.mutedStart,
-      theater: loaded.theaterMode,
-      showStats: loaded.showTechnicalStats,
-      playbackRate: loaded.playbackRate,
-    }));
-    setMuted(loaded.mutedStart);
+    setPreferences(loaded);
     return subscribeAppSettings((next) => {
       setAppSettings(next);
-      setPreferences((current) => ({
-        ...current,
-        autoplay: next.autoplay,
-        mutedStart: next.mutedStart,
-        theater: next.theaterMode,
-        showStats: next.showTechnicalStats,
-        playbackRate: next.playbackRate,
-      }));
-      setMuted(next.mutedStart);
+      setPreferences(next);
       qualityApplyStarted.current = false;
     });
   }, []);
 
-  const update = useCallback((patch: Partial<Preferences>) => {
+  const update = useCallback((patch: Partial<AppSettings>) => {
     setPreferences((previous) => {
       const next = { ...previous, ...patch };
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      setAppSettings(next);
+      saveAppSettings(next);
       return next;
     });
   }, []);
@@ -70,13 +41,13 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
     if (!video) return;
     video.style.objectFit = preferences.fit;
     video.playbackRate = preferences.playbackRate;
-    video.muted = muted;
-    video.volume = volume;
+    video.muted = preferences.mutedStart;
+    video.volume = preferences.volume;
     if (preferences.autoplay) void video.play().catch(() => undefined);
-  }, [getVideo, muted, preferences.autoplay, preferences.fit, preferences.playbackRate, volume]);
+  }, [getVideo, preferences.autoplay, preferences.fit, preferences.mutedStart, preferences.playbackRate, preferences.volume]);
 
   useEffect(() => {
-    if (!appSettings || appSettings.defaultQuality === 'auto' || !shellRef.current) return;
+    if (appSettings.defaultQuality === 'auto' || !shellRef.current) return;
     qualityApplyStarted.current = false;
     let attempts = 0;
     const timer = window.setInterval(() => {
@@ -98,10 +69,10 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
       if (attempts >= 14) window.clearInterval(timer);
     }, 350);
     return () => window.clearInterval(timer);
-  }, [appSettings, channel.id]);
+  }, [appSettings.defaultQuality, channel.id]);
 
   useEffect(() => {
-    if (!preferences.showStats) return;
+    if (!preferences.showTechnicalStats) return;
     const timer = window.setInterval(() => {
       const video = getVideo();
       if (!video) return;
@@ -109,7 +80,7 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
       setStats({ resolution: video.videoWidth && video.videoHeight ? `${video.videoWidth}×${video.videoHeight}` : '—', readyState: video.readyState, buffered, currentTime: video.currentTime });
     }, 500);
     return () => window.clearInterval(timer);
-  }, [getVideo, preferences.showStats]);
+  }, [getVideo, preferences.showTechnicalStats]);
 
   const refresh = useCallback(() => {
     const video = getVideo();
@@ -134,29 +105,30 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
   }, [getVideo]);
 
   const toggleMute = useCallback(() => {
-    const next = !muted;
-    setMuted(next);
-    const video = getVideo();
-    if (video) video.muted = next;
-  }, [getVideo, muted]);
+    update({ mutedStart: !preferences.mutedStart });
+  }, [preferences.mutedStart, update]);
+
+  const setVolume = useCallback((next: number) => {
+    update({ volume: next, mutedStart: next === 0 });
+  }, [update]);
 
   return (
-    <div ref={shellRef} className={`${styles.shell}${preferences.theater ? ` ${styles.theater}` : ''}`}>
+    <div ref={shellRef} className="player-pro-enhanced-shell">
       <PlayerPro channel={channel} />
-      {preferences.showStats && <div className={styles.stats} dir="ltr"><span>{stats.resolution}</span><span>buffer {stats.buffered.toFixed(1)}s</span><span>ready {stats.readyState}</span><span>t {stats.currentTime.toFixed(1)}s</span></div>}
-      <div className={styles.toolbar} dir="rtl">
+      {preferences.showTechnicalStats && <div className={styles.stats} dir="ltr"><span>{stats.resolution}</span><span>buffer {stats.buffered.toFixed(1)}s</span><span>ready {stats.readyState}</span><span>t {stats.currentTime.toFixed(1)}s</span></div>}
+      <div className={`${styles.toolbar} player-pro-enhanced-toolbar`} dir="rtl">
         <button onClick={() => setSettingsOpen((value) => !value)} title="تنظیمات پیشرفته"><Settings2 size={17} /> تنظیمات</button>
         <button onClick={refresh} title="اتصال مجدد"><RefreshCw size={17} /> اتصال مجدد</button>
-        <button onClick={toggleMute} title={muted ? 'فعال کردن صدا' : 'بی‌صدا'}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}{muted ? 'بی‌صدا' : 'صدا'}</button>
-        <label className={styles.volume} title="بلندی صدا"><Volume2 size={15} /><input type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} onChange={(event) => { const next = Number(event.target.value); setVolume(next); setMuted(next === 0); }} /></label>
+        <button className="player-pro-enhanced-sound-button" onClick={toggleMute} title={preferences.mutedStart ? 'فعال کردن صدا' : 'بی‌صدا'} aria-label={preferences.mutedStart ? 'فعال کردن صدا' : 'بی‌صدا'}>{preferences.mutedStart ? <VolumeX size={17} /> : <Volume2 size={17} />}{preferences.mutedStart ? 'بی‌صدا' : 'صدا'}</button>
+        <label className={styles.volume} title="بلندی صدا"><Volume2 size={15} /><input type="range" min="0" max="1" step="0.01" value={preferences.mutedStart ? 0 : preferences.volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="بلندی صدا" /></label>
         <button onClick={pip} title="Picture in Picture"><PictureInPicture2 size={17} /> PiP</button>
         <button onClick={fullscreen} title="تمام صفحه"><Maximize2 size={17} /> تمام صفحه</button>
       </div>
       {settingsOpen && <div className={styles.panel} dir="rtl">
         <div className={styles.panelHeader}><div><strong>تنظیمات Player Pro</strong><span>تنظیمات این مرورگر ذخیره می‌شوند</span></div><button onClick={() => setSettingsOpen(false)} aria-label="بستن"><X size={18} /></button></div>
-        <section><h4><MonitorPlay size={16} /> پخش</h4><button className={preferences.autoplay ? styles.active : ''} onClick={() => update({ autoplay: !preferences.autoplay })}><span>پخش خودکار</span>{preferences.autoplay ? <Check size={16} /> : null}</button><button className={preferences.mutedStart ? styles.active : ''} onClick={() => { const next = !preferences.mutedStart; update({ mutedStart: next }); setMuted(next); }}><span>شروع بی‌صدا</span>{preferences.mutedStart ? <Check size={16} /> : null}</button><div className={styles.row}><span>سرعت پخش</span><select value={preferences.playbackRate} onChange={(event) => update({ playbackRate: Number(event.target.value) })}>{[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}</select></div></section>
-        <section><h4><Settings2 size={16} /> تنظیمات عمومی</h4><div className={styles.infoGrid}><span>کیفیت پیش‌فرض</span><strong>{appSettings?.defaultQuality === 'auto' ? 'Auto' : `${appSettings?.defaultQuality}p`}</strong><span>Low Latency</span><strong>{appSettings?.lowLatency ? 'On' : 'Off'}</strong><span>Auto Failover</span><strong>{appSettings?.autoFailover ? 'On' : 'Off'}</strong></div></section>
-        <section><h4><BarChart3 size={16} /> تصویر</h4><div className={styles.choiceGrid}>{([['contain','اصلی'],['cover','پر کردن'],['fill','کشیده']] as Array<[Fit,string]>).map(([fit,label]) => <button key={fit} className={preferences.fit === fit ? styles.selected : ''} onClick={() => update({ fit })}>{label}{preferences.fit === fit ? <Check size={14} /> : null}</button>)}</div><button className={preferences.theater ? styles.active : ''} onClick={() => update({ theater: !preferences.theater })}><span>حالت سینمایی</span>{preferences.theater ? <Check size={16} /> : null}</button><button className={preferences.showStats ? styles.active : ''} onClick={() => update({ showStats: !preferences.showStats })}><span>نمایش آمار فنی</span>{preferences.showStats ? <Check size={16} /> : null}</button></section>
+        <section><h4><MonitorPlay size={16} /> پخش</h4><button className={preferences.autoplay ? styles.active : ''} onClick={() => update({ autoplay: !preferences.autoplay })}><span>پخش خودکار</span>{preferences.autoplay ? <Check size={16} /> : null}</button><button className={preferences.mutedStart ? styles.active : ''} onClick={toggleMute}><span>شروع بی‌صدا</span>{preferences.mutedStart ? <Check size={16} /> : null}</button><div className={styles.row}><span>سرعت پخش</span><select value={preferences.playbackRate} onChange={(event) => update({ playbackRate: Number(event.target.value) })}>{[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}</select></div><div className={styles.row}><span>بلندی صدا</span><strong>{Math.round(preferences.volume * 100)}%</strong></div></section>
+        <section><h4><Settings2 size={16} /> تنظیمات عمومی</h4><div className={styles.infoGrid}><span>کیفیت پیش‌فرض</span><strong>{appSettings.defaultQuality === 'auto' ? 'Auto' : `${appSettings.defaultQuality}p`}</strong><span>Low Latency</span><strong>{appSettings.lowLatency ? 'On' : 'Off'}</strong><span>Auto Failover</span><strong>{appSettings.autoFailover ? 'On' : 'Off'}</strong></div></section>
+        <section><h4><BarChart3 size={16} /> تصویر</h4><div className={styles.choiceGrid}>{(['contain','cover','fill'] as const).map((fit) => { const label = fit === 'contain' ? 'اصلی' : fit === 'cover' ? 'پر کردن' : 'کشیده'; return <button key={fit} className={preferences.fit === fit ? styles.selected : ''} onClick={() => update({ fit })}>{label}{preferences.fit === fit ? <Check size={14} /> : null}</button>; })}</div><button className={preferences.theaterMode ? styles.active : ''} onClick={() => update({ theaterMode: !preferences.theaterMode })}><span>حالت سینمایی</span>{preferences.theaterMode ? <Check size={16} /> : null}</button><button className={preferences.showTechnicalStats ? styles.active : ''} onClick={() => update({ showTechnicalStats: !preferences.showTechnicalStats })}><span>نمایش آمار فنی</span>{preferences.showTechnicalStats ? <Check size={16} /> : null}</button></section>
         <section className={styles.shortcuts}><h4>کنترل سریع</h4><div><kbd>Space</kbd> پخش / توقف</div><div><kbd>M</kbd> صدا <kbd>F</kbd> تمام صفحه</div><div><kbd>Double Click</kbd> تمام صفحه</div></section>
       </div>}
     </div>
