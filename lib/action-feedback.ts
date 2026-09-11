@@ -1,5 +1,13 @@
 'use client';
 
+import {
+  isStreamTrafficUrl,
+  noteStreamRequestEnd,
+  noteStreamRequestStart,
+  scheduleAppNetworkRequest,
+  setLowNetworkPriority,
+} from './network-qos';
+
 export type ActionFeedbackStatus = 'start' | 'done' | 'error';
 export type ActionFeedbackPayload = {
   id: string;
@@ -79,6 +87,16 @@ function requestLabel(url: string, method: string) {
   return method === 'GET' ? 'در حال دریافت اطلاعات' : 'در حال پردازش درخواست';
 }
 
+function isHighPriorityAppRequest(method: string, url: string) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return false;
+  return !isStreamTrafficUrl(url);
+}
+
+function shouldQoSRequest(method: string, url: string) {
+  if (isStreamTrafficUrl(url)) return false;
+  return method === 'GET' || method === 'HEAD';
+}
+
 export function installGlobalActionPipeline() {
   if (typeof window === 'undefined') return () => undefined;
   const target = window as Window & { [PIPELINE_INSTALLED]?: boolean; __momsatOriginalFetch?: typeof window.fetch; __momsatOriginalOpen?: typeof XMLHttpRequest.prototype.open; __momsatOriginalSend?: typeof XMLHttpRequest.prototype.send };
@@ -90,12 +108,35 @@ export function installGlobalActionPipeline() {
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const method = String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
     const url = input instanceof Request ? input.url : String(input);
+
+    if (isStreamTrafficUrl(url)) {
+      noteStreamRequestStart(url);
+      const request = originalFetch(input, init);
+      void request.finally(() => noteStreamRequestEnd(url));
+      return request;
+    }
+
     const label = requestLabel(url, method);
-    if (!label) return originalFetch(input, init);
+    const preparedInit = shouldQoSRequest(method, url)
+      ? setLowNetworkPriority(init, true)
+      : init;
+
+    if (!label) {
+      if (!shouldQoSRequest(method, url)) return originalFetch(input, preparedInit);
+      return scheduleAppNetworkRequest(() => originalFetch(input, preparedInit), { highPriority: isHighPriorityAppRequest(method, url) });
+    }
 
     const key = `${method}:${url}`;
     if ((method === 'GET' || method === 'HEAD') && inflight.has(key)) return inflight.get(key) as Promise<Response>;
-    return runAction(key, () => originalFetch(input, init), { label, dedupe: method === 'GET' || method === 'HEAD' });
+
+    const task = () => originalFetch(input, preparedInit);
+    return runAction(
+      key,
+      () => shouldQoSRequest(method, url)
+        ? scheduleAppNetworkRequest(task, { highPriority: isHighPriorityAppRequest(method, url) })
+        : task(),
+      { label, dedupe: method === 'GET' || method === 'HEAD' },
+    );
   }) as typeof window.fetch;
 
   const originalOpen = XMLHttpRequest.prototype.open;
@@ -128,14 +169,20 @@ export function installGlobalActionPipeline() {
   };
 
   XMLHttpRequest.prototype.send = function(...args: any[]) {
-    const xhr = this as XMLHttpRequest & { __momsatMethod?: string; __momsatUrl?: string; __momsatActionId?: string };
+    const xhr = this as XMLHttpRequest & { __momsatMethod?: string; __momsatUrl?: string; __momsatActionId?: string; __momsatStreamUrl?: string };
     const method = xhr.__momsatMethod || 'GET';
     const url = xhr.__momsatUrl || '';
     const label = requestLabel(url, method);
-    if (!label) {
-      const send = originalSend as (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) => void;
-      return send.call(this, args[0] as Document | XMLHttpRequestBodyInit | null);
+    const streamTraffic = isStreamTrafficUrl(url);
+
+    if (streamTraffic) {
+      xhr.__momsatStreamUrl = url;
+      noteStreamRequestStart(url);
+      xhr.addEventListener('loadend', () => noteStreamRequestEnd(url), { once: true });
     }
+
+    const send = originalSend as (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) => void;
+    if (!label) return send.call(this, args[0] as Document | XMLHttpRequestBodyInit | null);
 
     const id = `xhr:${method}:${url}`;
     xhr.__momsatActionId = id;
@@ -144,7 +191,7 @@ export function installGlobalActionPipeline() {
       if (xhr.status >= 200 && xhr.status < 400) finishAction(id);
       else failAction(id, `درخواست با وضعیت ${xhr.status || 'نامشخص'} پایان یافت`);
     }, { once: true });
-    const send = originalSend as (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) => void;
+
     return send.call(this, args[0] as Document | XMLHttpRequestBodyInit | null);
   };
 
