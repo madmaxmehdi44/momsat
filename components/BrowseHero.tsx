@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useMemo } from 'react';
 import type { Channel } from '../lib/source';
 import styles from './BrowseHero.module.css';
 
@@ -13,51 +13,40 @@ function pickHero(channels: Channel[]) {
 
 export default function BrowseHero({ channels }: Props) {
   const hero = pickHero(channels);
-  const preload = channels.filter((channel) => channel.image).slice(0, 6);
-
-  useEffect(() => {
-    const links: HTMLLinkElement[] = [];
-    for (const channel of preload) {
-      if (!channel.image) continue;
-      const link = document.createElement('link');
-      link.rel = 'preload';
-      link.as = 'image';
-      link.href = channel.image;
-      document.head.appendChild(link);
-      links.push(link);
-    }
-    return () => links.forEach((link) => link.remove());
-  }, [preload]);
+  const preload = useMemo(() => channels.filter((channel) => channel.image).slice(0, 6), [channels]);
 
   if (!hero) return null;
 
   return (
-    <section className={styles.hero} aria-label="شبکه منتخب">
-      <div className={styles.backdrop} style={hero.image ? { backgroundImage: `url("${hero.image.replace(/"/g, '%22')}")` } : undefined} />
-      <div className={styles.content}>
-        <div className={styles.kicker}>MOMSAT · شبکه منتخب</div>
-        <div className={styles.grid}>
-          <div className={styles.copy}>
-            <span className={styles.live}><i /> LIVE CATALOG</span>
-            <h2>{hero.name}</h2>
-            <p>{hero.nameEn || 'Live television'}</p>
-            <div className={styles.meta}>
-              <span>{hero.category || 'شبکه تلویزیونی'}</span>
-              {hero.country ? <span>{hero.country}</span> : null}
-              {hero.satellite ? <span>ماهواره‌ای</span> : null}
-              <span>{hero.sources?.length ?? 0} منبع</span>
+    <>
+      {preload.slice(0, 3).map((channel) => channel.image ? <link key={channel.id} rel="preload" as="image" href={channel.image} /> : null)}
+      <section className={styles.hero} aria-label="شبکه منتخب">
+        <div className={styles.backdrop} style={hero.image ? { backgroundImage: `url("${hero.image.replace(/"/g, '%22')}")` } : undefined} />
+        <div className={styles.content}>
+          <div className={styles.kicker}>MOMSAT · شبکه منتخب</div>
+          <div className={styles.grid}>
+            <div className={styles.copy}>
+              <span className={styles.live}><i /> LIVE CATALOG</span>
+              <h2>{hero.name}</h2>
+              <p>{hero.nameEn || 'Live television'}</p>
+              <div className={styles.meta}>
+                <span>{hero.category || 'شبکه تلویزیونی'}</span>
+                {hero.country ? <span>{hero.country}</span> : null}
+                {hero.satellite ? <span>ماهواره‌ای</span> : null}
+                <span>{hero.sources?.length ?? 0} منبع</span>
+              </div>
+              <div className={styles.actions}>
+                <Link className={styles.primary} href={`/channel/${hero.id}`}>تماشا</Link>
+                <Link className={styles.secondary} href={`/channel/${hero.id}`}>جزئیات شبکه</Link>
+              </div>
             </div>
-            <div className={styles.actions}>
-              <Link className={styles.primary} href={`/channel/${hero.id}`}>تماشا</Link>
-              <Link className={styles.secondary} href={`/channel/${hero.id}`}>جزئیات شبکه</Link>
+            <div className={styles.visual}>
+              {hero.image ? <img src={hero.image} alt={hero.name} fetchPriority="high" decoding="async" /> : <div className={styles.fallback}>{(hero.nameEn || hero.name).slice(0, 3).toUpperCase()}</div>}
+              <div className={styles.glow} />
             </div>
-          </div>
-          <div className={styles.visual}>
-            {hero.image ? <img src={hero.image} alt={hero.name} fetchPriority="high" decoding="async" /> : <div className={styles.fallback}>{(hero.nameEn || hero.name).slice(0, 3).toUpperCase()}</div>}
-            <div className={styles.glow} />
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </>
   );
 }
