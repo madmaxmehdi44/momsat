@@ -36,7 +36,13 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({})) as { channelIds?: unknown; urls?: unknown };
     const channelIds = Array.isArray(body.channelIds) ? body.channelIds.map(Number).filter((id) => Number.isInteger(id) && id > 0) : undefined;
-    const requestedUrls = new Set(Array.isArray(body.urls) ? body.urls.filter((v): v is string => typeof v === 'string' && v.trim()).map((v) => v.trim()) : []);
+    const requestedUrls = new Set(
+      Array.isArray(body.urls)
+        ? body.urls
+            .filter((v): v is string => typeof v === 'string' && Boolean(v.trim()))
+            .map((v) => v.trim())
+        : [],
+    );
     const channels = await activeChannels(channelIds?.length ? channelIds : undefined);
     const jobs: Array<{ channelId: number; channelName: string; url: string; referer: string | null; origin: string | null }> = [];
     for (const channel of channels) {
