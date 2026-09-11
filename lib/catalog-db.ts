@@ -67,12 +67,21 @@ async function normalizeCatalog(channels: Channel[]) {
 async function fetchCatalogFromDb(): Promise<Channel[] | null> {
   if (!process.env.DATABASE_URL?.trim()) return null;
   try {
-    const rows = await prisma.channel.findMany({
+    const timeout = new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), 4500);
+    });
+    const databaseLoad = prisma.channel.findMany({
       where: { archiveStatus: null },
       orderBy: [{ popular: 'desc' }, { name: 'asc' }],
       include: dbInclude,
-    });
-    return normalizeCatalog(rows.map(toCatalog));
+    }).then((rows) => normalizeCatalog(rows.map(toCatalog)));
+
+    const result = await Promise.race([databaseLoad, timeout]);
+    if (result === null) {
+      console.warn('[catalog-db] Database catalog timed out; falling back to configured catalog sources.');
+      return null;
+    }
+    return result;
   } catch (error) {
     console.warn('[catalog-db] Database unavailable, falling back to configured catalog sources.', error);
     return null;
@@ -88,7 +97,7 @@ async function loadCatalog(): Promise<Channel[]> {
 }
 
 export async function getCatalog() {
-  return ttlGetOrSet('momsat:catalog:v6:database-first-health-ranked-thumbnails', catalogTtlMs(), loadCatalog);
+  return ttlGetOrSet('momsat:catalog:v7:database-first-health-ranked-reliable-thumbnails', catalogTtlMs(), loadCatalog);
 }
 
 export function getCategories(channels: Channel[]) {
