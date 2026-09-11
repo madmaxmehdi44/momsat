@@ -2,6 +2,7 @@ import { prisma } from './prisma';
 import { fetchCatalog, categoriesOf, Channel } from './source';
 import { ensureChannelThumbnail } from './channel-thumbnail';
 import { ttlGetOrSet } from './ttl-cache';
+import { rankCatalogChannels } from './catalog-ranking';
 
 export type { Channel };
 
@@ -46,19 +47,18 @@ function toCatalog(channel: DbChannel): Channel {
     serviceId: channel.serviceId,
     category: channel.categoryName || channel.category.name,
     categoryEn: channel.categoryNameEn || channel.category.nameEn,
+    archiveStatus: channel.archiveStatus ?? null,
+    archiveNote: channel.archiveNote ?? null,
+    archiveSince: channel.archiveSince?.toISOString() ?? null,
     sources,
   };
 }
 
 async function fetchCatalogFromDb(): Promise<Channel[] | null> {
   if (!process.env.DATABASE_URL?.trim()) return null;
-
   try {
-    const rows = await prisma.channel.findMany({
-      orderBy: [{ popular: 'desc' }, { name: 'asc' }],
-      include: dbInclude,
-    });
-    return rows.map(toCatalog);
+    const rows = await prisma.channel.findMany({ orderBy: [{ popular: 'desc' }, { name: 'asc' }], include: dbInclude });
+    return rankCatalogChannels(rows.map(toCatalog));
   } catch (error) {
     console.warn('[catalog-db] Database unavailable, falling back to configured catalog sources.', error);
     return null;
@@ -70,11 +70,11 @@ const catalogTtlMs = () => Math.max(10_000, Number(process.env.CATALOG_CACHE_TTL
 async function loadCatalog(): Promise<Channel[]> {
   const databaseCatalog = await fetchCatalogFromDb();
   if (databaseCatalog && databaseCatalog.length > 0) return databaseCatalog;
-  return fetchCatalog();
+  return rankCatalogChannels(await fetchCatalog());
 }
 
 export async function getCatalog() {
-  return ttlGetOrSet('momsat:catalog:v3:database-first', catalogTtlMs(), loadCatalog);
+  return ttlGetOrSet('momsat:catalog:v4:database-first', catalogTtlMs(), loadCatalog);
 }
 
 export function getCategories(channels: Channel[]) {
@@ -83,7 +83,6 @@ export function getCategories(channels: Channel[]) {
 
 export async function findChannel(id: number) {
   if (!Number.isInteger(id) || id <= 0) return null;
-
   if (process.env.DATABASE_URL?.trim()) {
     try {
       const row = await prisma.channel.findUnique({ where: { id }, include: dbInclude });
@@ -92,7 +91,6 @@ export async function findChannel(id: number) {
       console.warn('[catalog-db] Database unavailable while resolving channel, using cached catalog.', error);
     }
   }
-
   const channels = await getCatalog();
   return channels.find((channel) => channel.id === id) ?? null;
 }
