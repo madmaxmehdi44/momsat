@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import styles from './historical.module.css';
 
 type Item = { id: number; name: string; nameEn: string; archiveStatus: 'MEMORY' | 'SHUTDOWN' | null; archiveNote: string | null; archiveSince: string | null };
-
 type RequestHeaders = Record<string, string>;
 
 export default function HistoricalAdmin() {
@@ -16,27 +16,84 @@ export default function HistoricalAdmin() {
   const headers = useCallback((): RequestHeaders => token.trim() ? { 'x-admin-token': token.trim() } : {}, [token]);
   const load = useCallback(async () => {
     setLoading(true); setError('');
-    try { const response = await fetch('/api/admin/historical', { headers: headers(), cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'خطا در دریافت آرشیو'); setItems(data.channels || []); }
-    catch (e) { setError(e instanceof Error ? e.message : 'خطا'); }
-    finally { setLoading(false); }
+    try {
+      const response = await fetch('/api/admin/historical', { headers: headers(), cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'خطا در دریافت آرشیو');
+      setItems(data.channels || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'خطا');
+    } finally {
+      setLoading(false);
+    }
   }, [headers]);
 
   useEffect(() => { void load(); }, [load]);
 
   async function save(item: Item) {
     setSaving(item.id); setError('');
-    try { const response = await fetch('/api/admin/historical', { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify({ channelId: item.id, status: item.archiveStatus, note: item.archiveNote, since: item.archiveSince || null }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'ذخیره ناموفق بود'); await load(); }
-    catch (e) { setError(e instanceof Error ? e.message : 'خطا'); }
-    finally { setSaving(null); }
+    try {
+      const response = await fetch('/api/admin/historical', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...headers() },
+        body: JSON.stringify({ channelId: item.id, status: item.archiveStatus, note: item.archiveNote, since: item.archiveSince || null }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ذخیره ناموفق بود');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'خطا');
+    } finally {
+      setSaving(null);
+    }
   }
 
-  function update(id: number, patch: Partial<Item>) { setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item)); }
+  function update(id: number, patch: Partial<Item>) {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }
 
-  return <main style={{ maxWidth: 1100, margin: '0 auto', padding: 24, fontFamily: 'Tahoma, Arial, sans-serif', direction: 'rtl' }}>
-    <h1 style={{ marginBottom: 6 }}>مدیریت آرشیو شبکه‌ها</h1>
-    <p style={{ color: '#718096', fontSize: 13 }}>شبکه را به «خاطره‌انگیز» یا «خاموش‌شده» علامت بزن. خالی کردن وضعیت، شبکه را از آرشیو حذف می‌کند.</p>
-    <div style={{ display: 'flex', gap: 8, margin: '18px 0', flexWrap: 'wrap' }}><input value={token} onChange={(e) => setToken(e.target.value)} placeholder="Admin token" type="password" style={{ flex: 1, minWidth: 220, padding: 10, borderRadius: 8, border: '1px solid #d7dce4' }} /><button onClick={() => void load()} style={{ padding: '10px 16px', borderRadius: 8, border: 0, cursor: 'pointer' }}>بارگذاری</button></div>
-    {error ? <div style={{ padding: 12, marginBottom: 12, borderRadius: 8, background: '#fff0f0', color: '#9b2c2c' }}>{error}</div> : null}
-    {loading ? <p>در حال بارگذاری…</p> : items.length === 0 ? <div style={{ padding: 18, border: '1px dashed #cbd5e0', borderRadius: 10 }}>هنوز هیچ شبکه‌ای در آرشیو ثبت نشده است.</div> : <div style={{ display: 'grid', gap: 10 }}>{items.map((item) => <div key={item.id} style={{ padding: 14, border: '1px solid #e2e8f0', borderRadius: 12, background: '#fff' }}><div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center' }}><div><strong>{item.name}</strong><div style={{ color: '#718096', fontSize: 11, marginTop: 4 }}>{item.nameEn} · ID {item.id}</div></div><select value={item.archiveStatus || ''} onChange={(e) => update(item.id, { archiveStatus: (e.target.value || null) as Item['archiveStatus'] })} style={{ padding: 8, borderRadius: 7, border: '1px solid #d7dce4' }}><option value="">بدون آرشیو</option><option value="MEMORY">خاطره‌انگیز</option><option value="SHUTDOWN">خاموش‌شده</option></select></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 180px auto', gap: 8, marginTop: 10 }}><input value={item.archiveNote || ''} onChange={(e) => update(item.id, { archiveNote: e.target.value })} placeholder="یادداشت تاریخی" style={{ padding: 9, borderRadius: 7, border: '1px solid #d7dce4' }} /><input value={item.archiveSince ? item.archiveSince.slice(0, 10) : ''} onChange={(e) => update(item.id, { archiveSince: e.target.value ? new Date(`${e.target.value}T00:00:00.000Z`).toISOString() : null })} type="date" style={{ padding: 9, borderRadius: 7, border: '1px solid #d7dce4' }} /><button disabled={saving === item.id} onClick={() => void save(item)} style={{ padding: '9px 14px', borderRadius: 7, border: 0, cursor: 'pointer' }}>{saving === item.id ? 'ذخیره…' : 'ذخیره'}</button></div></div>)}</div>}
-  </main>;
+  return (
+    <main dir="rtl" className={styles.page}>
+      <div className={styles.inner}>
+        <header className={styles.header}>
+          <div>
+            <div className={styles.eyebrow}>MOMSAT · HISTORICAL ARCHIVE</div>
+            <h1 className={styles.title}>مدیریت آرشیو شبکه‌ها</h1>
+            <p className={styles.description}>شبکه را به «خاطره‌انگیز» یا «خاموش‌شده» علامت بزن. خالی کردن وضعیت، شبکه را از آرشیو حذف می‌کند.</p>
+          </div>
+        </header>
+
+        <div className={styles.toolbar}>
+          <input className={styles.input} value={token} onChange={(e) => setToken(e.target.value)} placeholder="Admin token" type="password" />
+          <button className={styles.button} onClick={() => void load()}>بارگذاری</button>
+        </div>
+
+        {error ? <div className={styles.error}>{error}</div> : null}
+        {loading ? <div className={styles.state}>در حال بارگذاری…</div> : items.length === 0 ? <div className={styles.state}>هنوز هیچ شبکه‌ای در آرشیو ثبت نشده است.</div> : (
+          <div className={styles.list}>
+            {items.map((item) => (
+              <article key={item.id} className={styles.card}>
+                <div className={styles.cardTop}>
+                  <div>
+                    <strong className={styles.name}>{item.name}</strong>
+                    <div className={styles.meta}>{item.nameEn} · ID {item.id}</div>
+                  </div>
+                  <select className={styles.select} value={item.archiveStatus || ''} onChange={(e) => update(item.id, { archiveStatus: (e.target.value || null) as Item['archiveStatus'] })}>
+                    <option value="">بدون آرشیو</option>
+                    <option value="MEMORY">خاطره‌انگیز</option>
+                    <option value="SHUTDOWN">خاموش‌شده</option>
+                  </select>
+                </div>
+                <div className={styles.fields}>
+                  <input className={styles.field} value={item.archiveNote || ''} onChange={(e) => update(item.id, { archiveNote: e.target.value })} placeholder="یادداشت تاریخی" />
+                  <input className={styles.field} value={item.archiveSince ? item.archiveSince.slice(0, 10) : ''} onChange={(e) => update(item.id, { archiveSince: e.target.value ? new Date(`${e.target.value}T00:00:00.000Z`).toISOString() : null })} type="date" />
+                  <button className={styles.save} disabled={saving === item.id} onClick={() => void save(item)}>{saving === item.id ? 'ذخیره…' : 'ذخیره'}</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </main>
+  );
 }
