@@ -51,65 +51,32 @@ async function capture(channel: Channel): Promise<{ dataUrl: string; sourceUrl: 
     const url = proxyUrl(candidate, channel);
     const video = document.createElement('video');
     const hlsInstances: Hls[] = [];
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = 'auto';
-    video.crossOrigin = 'anonymous';
+    video.muted = true; video.playsInline = true; video.preload = 'auto'; video.crossOrigin = 'anonymous';
     video.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:2px;height:2px;opacity:0;pointer-events:none;';
     document.body.appendChild(video);
-
     try {
       const loaded = await new Promise<boolean>((resolve) => {
         let settled = false;
-        const finish = (value: boolean) => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          resolve(value);
-        };
+        const finish = (value: boolean) => { if (settled) return; settled = true; window.clearTimeout(timer); resolve(value); };
         const timer = window.setTimeout(() => finish(false), CAPTURE_TIMEOUT);
         video.addEventListener('loadeddata', () => finish(true), { once: true });
         video.addEventListener('canplay', () => finish(true), { once: true });
         video.addEventListener('error', () => finish(false), { once: true });
-
         if (/\.m3u8(?:$|[?#])/i.test(url)) {
           if (Hls.isSupported()) {
-            const hls = new Hls({
-              enableWorker: true,
-              lowLatencyMode: true,
-              backBufferLength: 6,
-              maxBufferLength: 6,
-              maxMaxBufferLength: 10,
-              manifestLoadingMaxRetry: 1,
-              levelLoadingMaxRetry: 1,
-              fragLoadingMaxRetry: 1,
-              manifestLoadingTimeOut: 3500,
-              levelLoadingTimeOut: 3500,
-              fragLoadingTimeOut: 4000,
-            });
+            const hls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 6, maxBufferLength: 6, maxMaxBufferLength: 10, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 1, manifestLoadingTimeOut: 3500, levelLoadingTimeOut: 3500, fragLoadingTimeOut: 4000 });
             hlsInstances.push(hls);
-            hls.on(Hls.Events.ERROR, (_event, data) => {
-              if (data.fatal) finish(false);
-            });
-            hls.loadSource(url);
-            hls.attachMedia(video);
-          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url;
-          } else {
-            finish(false);
-          }
-        } else {
-          video.src = url;
-        }
+            hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) finish(false); });
+            hls.loadSource(url); hls.attachMedia(video);
+          } else if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = url;
+          else finish(false);
+        } else video.src = url;
         void video.play().catch(() => undefined);
       });
-
       if (!loaded || !video.videoWidth || !video.videoHeight) continue;
       await new Promise((resolve) => window.setTimeout(resolve, 120));
-
       const canvas = document.createElement('canvas');
-      canvas.width = 480;
-      canvas.height = Math.max(270, Math.round((480 * video.videoHeight) / video.videoWidth));
+      canvas.width = 480; canvas.height = Math.max(270, Math.round((480 * video.videoHeight) / video.videoWidth));
       const ctx = canvas.getContext('2d');
       if (!ctx) continue;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -119,13 +86,8 @@ async function capture(channel: Channel): Promise<{ dataUrl: string; sourceUrl: 
     } catch {
       // Try the next source.
     } finally {
-      for (const instance of hlsInstances) {
-        try { instance.destroy(); } catch { /* ignore cleanup errors */ }
-      }
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
-      video.remove();
+      for (const instance of hlsInstances) { try { instance.destroy(); } catch { /* ignore cleanup errors */ } }
+      video.pause(); video.removeAttribute('src'); video.load(); video.remove();
     }
   }
   return null;
@@ -162,25 +124,25 @@ export default function LiveChannelCatalogFixed({ channels, initialQuery = '', i
   const platforms = useMemo(() => Array.from(new Set(channels.map((c) => c.platform).filter(Boolean) as string[])).sort(), [channels]);
   const countries = useMemo(() => Array.from(new Set(channels.flatMap((c) => [c.country, ...(c.sources ?? []).map((s) => s.country)]).filter(Boolean) as string[])).sort(), [channels]);
 
-  const matches = useCallback((channel: Channel) => {
+  const metadataVisible = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
-    const haystack = [channel.name, channel.nameEn, channel.category, channel.categoryEn, channel.country, channel.platform, channel.satellite].filter(Boolean).join(' ').toLocaleLowerCase();
-    const status = snapshots[channel.id]?.status;
-    if (q && !haystack.includes(q)) return false;
-    if (category !== 'all' && String(channel.catId) !== category) return false;
-    if (platform !== 'all' && channel.platform !== platform) return false;
-    if (country !== 'all' && channel.country !== country && !(channel.sources ?? []).some((s) => s.country === country)) return false;
-    if (satelliteOnly && !channel.satellite) return false;
-    if (vpnOnly && !channel.vpn) return false;
-    if (vipOnly && !channel.vip && !(channel.sources ?? []).some((s) => s.vip)) return false;
-    if (statusFilter === 'offline' && status !== 'offline') return false;
-    if (statusFilter === 'online' && status === 'offline') return false;
-    return true;
-  }, [category, country, platform, query, satelliteOnly, snapshots, statusFilter, vipOnly, vpnOnly]);
+    return channels.filter((channel) => {
+      const haystack = [channel.name, channel.nameEn, channel.category, channel.categoryEn, channel.country, channel.platform, channel.satellite].filter(Boolean).join(' ').toLocaleLowerCase();
+      return (!q || haystack.includes(q)) &&
+        (category === 'all' || String(channel.catId) === category) &&
+        (platform === 'all' || channel.platform === platform) &&
+        (country === 'all' || channel.country === country || (channel.sources ?? []).some((s) => s.country === country)) &&
+        (!satelliteOnly || Boolean(channel.satellite)) &&
+        (!vpnOnly || channel.vpn) &&
+        (!vipOnly || channel.vip || (channel.sources ?? []).some((s) => s.vip));
+    });
+  }, [channels, query, category, platform, country, satelliteOnly, vpnOnly, vipOnly]);
 
-  const visible = useMemo(() => channels.filter(matches), [channels, matches]);
-  const online = useMemo(() => visible.filter((c) => snapshots[c.id]?.status !== 'offline'), [snapshots, visible]);
-  const offline = useMemo(() => visible.filter((c) => snapshots[c.id]?.status === 'offline'), [snapshots, visible]);
+  // Snapshot status never changes the default catalog order. It only affects the badge on the card.
+  const visible = useMemo(() => {
+    if (statusFilter === 'all') return metadataVisible;
+    return metadataVisible.filter((channel) => snapshots[channel.id]?.status === statusFilter);
+  }, [metadataVisible, statusFilter, snapshots]);
 
   const enqueue = useCallback((id: number) => {
     if (processedRef.current.has(id) || queuedRef.current.has(id)) return;
@@ -210,24 +172,12 @@ export default function LiveChannelCatalogFixed({ channels, initialQuery = '', i
           const cached = await getLiveThumbnail(id);
           if (!aliveRef.current) return;
           const fresh = Boolean(cached && Date.now() - cached.updatedAt < SNAPSHOT_TTL);
-          if (cached?.dataUrl) {
-            setSnapshots((current) => ({ ...current, [id]: { dataUrl: cached.dataUrl, status: fresh ? (cached.status as Status) : 'loading', cachedAt: cached.updatedAt } }));
-          }
+          if (cached?.dataUrl) setSnapshots((current) => ({ ...current, [id]: { dataUrl: cached.dataUrl, status: fresh ? (cached.status as Status) : 'loading', cachedAt: cached.updatedAt } }));
           if (fresh) return;
-
           const result = await capture(channel);
-          const entry: LiveThumbnailEntry = {
-            channelId: id,
-            dataUrl: result?.dataUrl || cached?.dataUrl || null,
-            sourceUrl: result?.sourceUrl || cached?.sourceUrl || null,
-            status: result ? 'online' : 'offline',
-            updatedAt: Date.now(),
-            failures: result ? 0 : (cached?.failures || 0) + 1,
-          };
+          const entry: LiveThumbnailEntry = { channelId: id, dataUrl: result?.dataUrl || cached?.dataUrl || null, sourceUrl: result?.sourceUrl || cached?.sourceUrl || null, status: result ? 'online' : 'offline', updatedAt: Date.now(), failures: result ? 0 : (cached?.failures || 0) + 1 };
           await setLiveThumbnail(entry);
-          if (aliveRef.current) {
-            setSnapshots((current) => ({ ...current, [id]: { dataUrl: entry.dataUrl, status: entry.status, cachedAt: entry.updatedAt } }));
-          }
+          if (aliveRef.current) setSnapshots((current) => ({ ...current, [id]: { dataUrl: entry.dataUrl, status: entry.status, cachedAt: entry.updatedAt } }));
         } finally {
           runningRef.current -= 1;
           pumpRef.current();
@@ -252,12 +202,7 @@ export default function LiveChannelCatalogFixed({ channels, initialQuery = '', i
     const connection = (navigator as Navigator & { connection?: Connection }).connection;
     const onConnectionChange = () => pumpRef.current();
     connection?.addEventListener?.('change', onConnectionChange);
-    return () => {
-      aliveRef.current = false;
-      observer.disconnect();
-      observerRef.current = null;
-      connection?.removeEventListener?.('change', onConnectionChange);
-    };
+    return () => { aliveRef.current = false; observer.disconnect(); observerRef.current = null; connection?.removeEventListener?.('change', onConnectionChange); };
   }, [enqueue]);
 
   const registerCard = useCallback((id: number, node: HTMLElement | null) => {
@@ -265,96 +210,57 @@ export default function LiveChannelCatalogFixed({ channels, initialQuery = '', i
       node.dataset.channelId = String(id);
       elementsRef.current.set(id, node);
       observerRef.current?.observe(node);
-    } else {
-      elementsRef.current.delete(id);
-    }
+    } else elementsRef.current.delete(id);
   }, []);
 
   const resetFilters = () => {
-    setQuery('');
-    setCategory('all');
-    setStatusFilter('all');
-    setPlatform('all');
-    setCountry('all');
-    setSatelliteOnly(false);
-    setVpnOnly(false);
-    setVipOnly(false);
+    setQuery(''); setCategory('all'); setStatusFilter('all'); setPlatform('all'); setCountry('all'); setSatelliteOnly(false); setVpnOnly(false); setVipOnly(false);
   };
+
+  const groups = useMemo(() => {
+    const map = new Map<string, Channel[]>();
+    for (const channel of visible) {
+      const key = channel.category || 'بدون دسته';
+      const list = map.get(key) || [];
+      list.push(channel);
+      map.set(key, list);
+    }
+    return Array.from(map.entries());
+  }, [visible]);
 
   const renderCard = (channel: Channel) => {
     const snapshot = snapshots[channel.id];
     const status = snapshot?.status || 'loading';
     const fallback = channel.image;
     const initials = (channel.nameEn || channel.name || 'TV').trim().slice(0, 3).toUpperCase();
-    return (
-      <Link
-        key={channel.id}
-        href={`/channel/${channel.id}`}
-        className={styles.card}
-        ref={(node) => registerCard(channel.id, node)}
-        data-channel-id={channel.id}
-      >
-        <div className={styles.thumb}>
-          {snapshot?.dataUrl ? <img className={styles.image} src={snapshot.dataUrl} alt={`${channel.name} live`} /> : fallback ? <img className={styles.image} src={fallback} alt={channel.name} /> : <div className={styles.placeholder}>{initials}</div>}
-          {status === 'online' ? <span className={styles.live}>LIVE</span> : status === 'offline' ? <span className={styles.offline}>موقتاً خاموش</span> : <span className={styles.loading}>در حال بررسی…</span>}
-          {snapshot?.dataUrl ? <span className={styles.cached}>LIVE SNAPSHOT</span> : null}
-        </div>
-        <div className={styles.body}>
-          <div className={styles.name}>{channel.name}</div>
-          <div className={styles.meta}>{channel.nameEn} · {(channel.sources ?? []).length} منبع</div>
-          <div className={styles.tags}>
-            {channel.category ? <span className={styles.tag}>{channel.category}</span> : null}
-            {channel.platform ? <span className={styles.tag}>{channel.platform}</span> : null}
-            {channel.satellite ? <span className={styles.tag}>SAT {channel.satellite}</span> : null}
-          </div>
-        </div>
-      </Link>
-    );
+    return <Link key={channel.id} href={`/channel/${channel.id}`} className={styles.card} ref={(node) => registerCard(channel.id, node)} data-channel-id={channel.id}>
+      <div className={styles.thumb}>
+        {snapshot?.dataUrl ? <img className={styles.image} src={snapshot.dataUrl} alt={`${channel.name} live`} /> : fallback ? <img className={styles.image} src={fallback} alt={channel.name} /> : <div className={styles.placeholder}>{initials}</div>}
+        {status === 'online' ? <span className={styles.live}>LIVE</span> : status === 'offline' ? <span className={styles.offline}>موقتاً خاموش</span> : <span className={styles.loading}>در حال بررسی…</span>}
+        {snapshot?.dataUrl ? <span className={styles.cached}>LIVE SNAPSHOT</span> : null}
+      </div>
+      <div className={styles.body}><div className={styles.name}>{channel.name}</div><div className={styles.meta}>{channel.nameEn} · {(channel.sources ?? []).length} منبع</div><div className={styles.tags}>{channel.category ? <span className={styles.tag}>{channel.category}</span> : null}{channel.platform ? <span className={styles.tag}>{channel.platform}</span> : null}{channel.satellite ? <span className={styles.tag}>SAT {channel.satellite}</span> : null}</div></div>
+    </Link>;
   };
 
-  const grouped = useMemo(() => {
-    const groups = new Map<string, Channel[]>();
-    for (const channel of online) {
-      const key = channel.category || 'بدون دسته';
-      const list = groups.get(key) || [];
-      list.push(channel);
-      groups.set(key, list);
-    }
-    return Array.from(groups.entries());
-  }, [online]);
-
-  return (
-    <section className={styles.catalog} dir="rtl">
-      <div className={styles.toolbar}>
-        <input className={styles.control} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="جستجوی نام، دسته، کشور، ماهواره…" />
-        <select className={styles.select} value={category} onChange={(e) => setCategory(e.target.value)}><option value="all">همه دسته‌ها</option>{categories.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
-        <select className={styles.select} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}><option value="all">همه وضعیت‌ها</option><option value="online">در حال پخش / در حال بررسی</option><option value="offline">موقتاً خاموش</option></select>
-        <select className={styles.select} value={platform} onChange={(e) => setPlatform(e.target.value)}><option value="all">همه پلتفرم‌ها</option>{platforms.map((x) => <option key={x} value={x}>{x}</option>)}</select>
-        <select className={styles.select} value={country} onChange={(e) => setCountry(e.target.value)}><option value="all">همه کشورها</option>{countries.map((x) => <option key={x} value={x}>{x}</option>)}</select>
-      </div>
-
-      <div className={styles.filterBar}>
-        <button type="button" className={`${styles.chip} ${category === 'all' ? styles.active : ''}`} onClick={() => setCategory('all')}>همه دسته‌ها</button>
-        <button type="button" className={`${styles.chip} ${satelliteOnly ? styles.active : ''}`} onClick={() => setSatelliteOnly((v) => !v)}>ماهواره‌ای</button>
-        <button type="button" className={`${styles.chip} ${vpnOnly ? styles.active : ''}`} onClick={() => setVpnOnly((v) => !v)}>VPN</button>
-        <button type="button" className={`${styles.chip} ${vipOnly ? styles.active : ''}`} onClick={() => setVipOnly((v) => !v)}>VIP</button>
-        <button type="button" className={styles.chip} onClick={resetFilters}>پاک کردن فیلترها</button>
-      </div>
-
-      <div className={styles.statusBox}>تصویر زنده فقط برای کارت‌های نزدیک viewport گرفته می‌شود. snapshot تازه از cache فوراً نمایش داده می‌شود؛ sourceهای خراب پس از تلاش روی «موقتاً خاموش» می‌روند.</div>
-
-      <div className={styles.sectionTitle}><span>شبکه‌ها</span><strong>{online.length}</strong></div>
-      {grouped.map(([name, items]) => (
-        <div key={name} className={styles.group}>
-          <div className={styles.groupTitle}>{name}<span>{items.length}</span></div>
-          <div className={styles.grid}>{items.map(renderCard)}</div>
-        </div>
-      ))}
-
-      {offline.length > 0 ? <>
-        <div className={styles.sectionTitle}><span>شبکه‌های موقتاً خاموش</span><strong>{offline.length}</strong></div>
-        <div className={styles.grid}>{offline.map(renderCard)}</div>
-      </> : null}
-    </section>
-  );
+  return <section className={styles.catalog} dir="rtl">
+    <div className={styles.toolbar}>
+      <input className={styles.control} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="جستجوی نام، دسته، کشور، ماهواره…" />
+      <select className={styles.select} value={category} onChange={(e) => setCategory(e.target.value)}><option value="all">همه دسته‌ها</option>{categories.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+      <select className={styles.select} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}><option value="all">همه وضعیت‌ها</option><option value="online">در حال پخش</option><option value="offline">موقتاً خاموش</option></select>
+      <select className={styles.select} value={platform} onChange={(e) => setPlatform(e.target.value)}><option value="all">همه پلتفرم‌ها</option>{platforms.map((x) => <option key={x} value={x}>{x}</option>)}</select>
+      <select className={styles.select} value={country} onChange={(e) => setCountry(e.target.value)}><option value="all">همه کشورها</option>{countries.map((x) => <option key={x} value={x}>{x}</option>)}</select>
+    </div>
+    <div className={styles.filterBar}>
+      <button type="button" className={`${styles.chip} ${category === 'all' ? styles.active : ''}`} onClick={() => setCategory('all')}>همه دسته‌ها</button>
+      <button type="button" className={`${styles.chip} ${satelliteOnly ? styles.active : ''}`} onClick={() => setSatelliteOnly((v) => !v)}>ماهواره‌ای</button>
+      <button type="button" className={`${styles.chip} ${vpnOnly ? styles.active : ''}`} onClick={() => setVpnOnly((v) => !v)}>VPN</button>
+      <button type="button" className={`${styles.chip} ${vipOnly ? styles.active : ''}`} onClick={() => setVipOnly((v) => !v)}>VIP</button>
+      <button type="button" className={styles.chip} onClick={resetFilters}>پاک کردن فیلترها</button>
+    </div>
+    <div className={styles.statusBox}>ترتیب کارت‌ها ثابت و مطابق کاتالوگ است؛ وضعیت لود، وجود snapshot یا شکست capture هرگز باعث جابه‌جایی کارت نمی‌شود. capture فقط برای کارت‌های نزدیک viewport انجام می‌شود.</div>
+    <div className={styles.sectionTitle}><span>شبکه‌ها</span><strong>{visible.length}</strong></div>
+    {groups.map(([name, items]) => <div key={name} className={styles.group}><div className={styles.groupTitle}>{name}<span>{items.length}</span></div><div className={styles.grid}>{items.map(renderCard)}</div></div>)}
+    {!visible.length ? <div className={styles.empty}>شبکه‌ای مطابق فیلتر فعلی پیدا نشد.</div> : null}
+  </section>;
 }
