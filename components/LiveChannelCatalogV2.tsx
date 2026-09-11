@@ -11,6 +11,7 @@ type Props = { channels: Channel[]; initialQuery?: string; initialCategory?: str
 type UiStatus = 'online' | 'offline' | 'loading';
 type Snapshot = { dataUrl: string | null; status: UiStatus; cachedAt?: number };
 type NavigatorConnection = { effectiveType?: string; downlink?: number; saveData?: boolean; addEventListener?: (type: string, listener: () => void) => void; removeEventListener?: (type: string, listener: () => void) => void };
+type CaptureCandidate = { id: number | null; title: string | null; url: string; referer: string | null; origin: string | null; country: string | null; vip: boolean };
 
 const CAPTURE_TIMEOUT_MS = 9000;
 
@@ -23,7 +24,7 @@ function captureConcurrency() {
   return 3;
 }
 
-function mediaUrl(channel: Channel, source: Channel['sources'][number] | null) {
+function mediaUrl(channel: Channel, source: CaptureCandidate | null) {
   const raw = source?.url || channel.url;
   if (!raw) return null;
   if (/^\/api\/stream\?/i.test(raw)) return raw;
@@ -35,8 +36,8 @@ function mediaUrl(channel: Channel, source: Channel['sources'][number] | null) {
   return `/api/stream?${params.toString()}`;
 }
 
-function sourceCandidates(channel: Channel) {
-  const raw = [{ url: channel.url, referer: channel.referer, origin: channel.origin }, ...(channel.sources || [])];
+function sourceCandidates(channel: Channel): CaptureCandidate[] {
+  const raw: CaptureCandidate[] = [{ id: null, title: null, url: channel.url, referer: channel.referer, origin: channel.origin, country: channel.country, vip: channel.vip }, ...(channel.sources || []).map((source) => ({ id: source.id, title: source.title, url: source.url, referer: source.referer, origin: source.origin, country: source.country, vip: source.vip }))];
   return Array.from(new Map(raw.filter((item) => Boolean(item.url)).map((item) => [item.url.trim(), item])).values());
 }
 
@@ -48,7 +49,7 @@ async function captureSnapshot(channel: Channel): Promise<{ dataUrl: string; sou
     video.muted = true; video.playsInline = true; video.preload = 'auto';
     video.style.cssText = 'position:fixed;width:2px;height:2px;left:-10000px;top:-10000px;opacity:0;pointer-events:none;';
     document.body.appendChild(video);
-    let hls: Hls | null = null;
+    let destroyHls: (() => void) | null = null;
     try {
       const loaded = await new Promise<boolean>((resolve) => {
         let settled = false;
@@ -59,7 +60,8 @@ async function captureSnapshot(channel: Channel): Promise<{ dataUrl: string; sou
         video.addEventListener('error', () => finish(false), { once: true });
         if (/\.m3u8(?:$|[?#])/i.test(url)) {
           if (Hls.isSupported()) {
-            hls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 8, maxBufferLength: 7, maxMaxBufferLength: 12, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 1, manifestLoadingTimeOut: 4500, levelLoadingTimeOut: 4500, fragLoadingTimeOut: 5000 });
+            const hls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 8, maxBufferLength: 7, maxMaxBufferLength: 12, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 1, manifestLoadingTimeOut: 4500, levelLoadingTimeOut: 4500, fragLoadingTimeOut: 5000 });
+            destroyHls = () => hls.destroy();
             hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) finish(false); });
             hls.loadSource(url); hls.attachMedia(video);
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = url;
@@ -80,7 +82,7 @@ async function captureSnapshot(channel: Channel): Promise<{ dataUrl: string; sou
     } catch {
       // Try another source.
     } finally {
-      try { hls?.destroy(); } catch {}
+      try { destroyHls?.(); } catch {}
       video.pause(); video.removeAttribute('src'); video.load(); video.remove();
     }
   }
