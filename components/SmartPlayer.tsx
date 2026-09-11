@@ -64,7 +64,7 @@ async function verifySources(sources: Source[]) {
 }
 
 export default function SmartPlayer({ channel }: { channel: Channel }) {
-  const { setActiveChannel } = usePersistentPlayer();
+  const { setActiveChannel, expanded, registerPlayerHost } = usePersistentPlayer();
   const candidates = useMemo(() => databaseCandidates(channel), [channel.id, channel.url, channel.referer, channel.origin, channel.sources]);
   const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
   const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url)), [candidates]);
@@ -110,7 +110,13 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     });
   }, [allSources, verified, channel, setActiveChannel]);
 
+  useEffect(() => {
+    if (!expanded) return;
+    return () => registerPlayerHost(null);
+  }, [expanded, registerPlayerHost]);
+
   if (allSources.length > 0) {
+    if (expanded) return <div ref={registerPlayerHost} className={styles.playerHost} aria-label="محل پخش زنده" />;
     return <div className={styles.persistentNotice}>پلیر هوشمند در پایین صفحه فعال است و با جابه‌جایی بین صفحات قطع نمی‌شود.</div>;
   }
   if (resolving) return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
