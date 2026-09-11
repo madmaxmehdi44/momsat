@@ -22,12 +22,9 @@ export default function YouTubeWatchPage({ channel, recommendations }: Props) {
   const toggleFavorite = () => { const current = readIds(FAVORITES_KEY); const next = current.includes(channel.id) ? current.filter((id) => id !== channel.id) : [channel.id, ...current].slice(0, 100); writeIds(FAVORITES_KEY, next); setFavorite(next.includes(channel.id)); };
   const share = async () => { const url = window.location.href; try { if (navigator.share) await navigator.share({ title: channel.name, text: `${channel.name} — MOMSAT`, url }); else { await navigator.clipboard.writeText(url); setShared(true); window.setTimeout(() => setShared(false), 1800); } } catch {} };
   return <div className={styles.page}>
-    <header className={styles.header}>
-      <Link href="/browse" className={styles.brand}>MOM<span>SAT</span></Link>
-      <div className={styles.headerActions}><button className={styles.headerButton} type="button" onClick={() => setTheater((v) => !v)}>{theater ? <X size={15} /> : <Tv2 size={15} />}{theater ? 'خروج از حالت سینما' : 'حالت سینما'}</button><Link href="/browse" className={styles.back}>بازگشت به شبکه‌ها</Link></div>
-    </header>
     <main className={`${styles.layout}${theater ? ` ${styles.theater}` : ''}`}>
       <section className={styles.mainColumn}>
+        <div className={styles.watchToolbar}><Link href="/browse" className={styles.back}>← بازگشت به شبکه‌ها</Link><button className={styles.headerButton} type="button" onClick={() => setTheater((v) => !v)}>{theater ? <X size={15} /> : <Tv2 size={15} />}{theater ? 'خروج از حالت سینما' : 'حالت سینما'}</button></div>
         <div className={styles.playerShell}><SmartPlayer channel={channel} /></div>
         <div className={styles.channelHeader}><div className={styles.titleBlock}><div className={styles.liveLine}><span /> LIVE NOW · {channel.category || 'LIVE TV'}</div><h1>{channel.name}</h1><p>{channel.nameEn || 'Live television'} · {channel.sources.length} source{channel.sources.length === 1 ? '' : 's'}</p></div><div className={styles.actions}><button type="button" onClick={toggleFavorite} className={favorite ? styles.activeAction : undefined}><Heart size={17} fill={favorite ? 'currentColor' : 'none'} /> {favorite ? 'ذخیره شد' : 'علاقه‌مندی'}</button><button type="button" onClick={share}><Share2 size={17} /> {shared ? 'کپی شد' : 'اشتراک‌گذاری'}</button><button type="button" aria-label="بیشتر" onClick={() => setShowMore((v) => !v)}><MoreHorizontal size={18} /></button></div></div>
         {showMore && <div className={styles.moreMenu}><button type="button" onClick={share}>{shared ? <Check size={15} /> : <Copy size={15} />} کپی لینک پخش</button><span>حالت سینما: T</span></div>}
