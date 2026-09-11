@@ -6,6 +6,9 @@ import type { PersistentChannel } from './PersistentPlayerProvider';
 type Props = { channel: PersistentChannel | null };
 
 const FAILURE_GRACE_MS = 8000;
+const FREEZE_RECOVERY_MS = 4500;
+const FREEZE_FAILURE_MS = 12000;
+const PROGRESS_POLL_MS = 1000;
 
 function sourceFromCurrentSrc(currentSrc: string) {
   if (!currentSrc) return '';
@@ -33,10 +36,14 @@ export default function StreamHealthObserver({ channel }: Props) {
 
     let currentUrl = '';
     let startedAt = 0;
+    let lastCurrentTime = -1;
+    let lastProgressAt = 0;
+    let recoveryAttempted = false;
     let failureReported = false;
     let successReported = false;
     let timer: number | null = null;
     let failureTimer: number | null = null;
+    let freezeTimer: number | null = null;
 
     const findVideo = () => document.querySelector('.persistent-player-host video, .player-pro-shell video, video.pro-player-video') as HTMLVideoElement | null;
 
@@ -47,32 +54,105 @@ export default function StreamHealthObserver({ channel }: Props) {
       }
     };
 
+    const clearFreezeTimer = () => {
+      if (freezeTimer != null) {
+        window.clearTimeout(freezeTimer);
+        freezeTimer = null;
+      }
+    };
+
     const syncCurrentSource = () => {
       const video = findVideo();
       if (!video) return null;
       const nextUrl = sourceFromCurrentSrc(video.currentSrc || video.getAttribute('src') || '');
       if (nextUrl && nextUrl !== currentUrl) {
         clearFailureTimer();
+        clearFreezeTimer();
         currentUrl = nextUrl;
         startedAt = performance.now();
+        lastCurrentTime = video.currentTime;
+        lastProgressAt = performance.now();
+        recoveryAttempted = false;
         failureReported = false;
         successReported = false;
       }
       return video;
     };
 
+    const softRecover = (video: HTMLVideoElement) => {
+      if (recoveryAttempted || video.paused || video.ended || !currentUrl) return;
+      recoveryAttempted = true;
+      try {
+        video.load();
+        void video.play().catch(() => undefined);
+      } catch {}
+    };
+
     const onLoadStart = () => {
       clearFailureTimer();
+      clearFreezeTimer();
       syncCurrentSource();
+    };
+
+    const onProgress = () => {
+      const video = syncCurrentSource();
+      if (!video) return;
+      if (video.currentTime !== lastCurrentTime) {
+        lastCurrentTime = video.currentTime;
+        lastProgressAt = performance.now();
+        recoveryAttempted = false;
+        clearFreezeTimer();
+      }
     };
 
     const onPlaying = () => {
       const video = syncCurrentSource();
       if (!video || !currentUrl) return;
       clearFailureTimer();
+      clearFreezeTimer();
+      lastCurrentTime = video.currentTime;
+      lastProgressAt = performance.now();
+      recoveryAttempted = false;
       if (successReported) return;
       successReported = true;
       report(channel.id!, currentUrl, 'success', Math.max(0, Math.round(performance.now() - startedAt)));
+    };
+
+    const scheduleFreezeCheck = () => {
+      clearFreezeTimer();
+      freezeTimer = window.setTimeout(() => {
+        freezeTimer = null;
+        const video = syncCurrentSource();
+        if (!video || video.paused || video.ended || successReported || failureReported || !currentUrl) return;
+
+        const now = performance.now();
+        const frozen = now - lastProgressAt >= FREEZE_RECOVERY_MS
+          && video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        if (!frozen) return;
+
+        softRecover(video);
+
+        const elapsed = now - lastProgressAt;
+        if (elapsed >= FREEZE_FAILURE_MS) {
+          failureReported = true;
+          report(
+            channel.id!,
+            currentUrl,
+            'failure',
+            Math.max(0, Math.round(now - startedAt)),
+            'Live playback frozen after recovery attempt',
+          );
+          return;
+        }
+
+        scheduleFreezeCheck();
+      }, FREEZE_RECOVERY_MS);
+    };
+
+    const onWaiting = () => {
+      const video = syncCurrentSource();
+      if (!video || video.paused || successReported || failureReported) return;
+      scheduleFreezeCheck();
     };
 
     const onError = () => {
@@ -89,15 +169,26 @@ export default function StreamHealthObserver({ channel }: Props) {
           && latest.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
         if (!stillBroken) return;
 
-        failureReported = true;
-        const mediaError = latest.error;
-        report(
-          channel.id!,
-          currentUrl,
-          'failure',
-          Math.max(0, Math.round(performance.now() - startedAt)),
-          mediaError ? `MediaError ${mediaError.code}` : 'HTMLMediaElement error after recovery grace',
-        );
+        softRecover(latest);
+        failureTimer = window.setTimeout(() => {
+          failureTimer = null;
+          const recovered = syncCurrentSource();
+          if (!recovered || successReported || failureReported || !currentUrl) return;
+          const stillBrokenAfterRecovery = recovered.error != null
+            && recovered.paused
+            && recovered.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+          if (!stillBrokenAfterRecovery) return;
+
+          failureReported = true;
+          const mediaError = recovered.error;
+          report(
+            channel.id!,
+            currentUrl,
+            'failure',
+            Math.max(0, Math.round(performance.now() - startedAt)),
+            mediaError ? `MediaError ${mediaError.code} after recovery` : 'HTMLMediaElement error after recovery grace',
+          );
+        }, FREEZE_RECOVERY_MS);
       }, FAILURE_GRACE_MS);
     };
 
@@ -106,6 +197,11 @@ export default function StreamHealthObserver({ channel }: Props) {
       if (!video) return;
       video.addEventListener('loadstart', onLoadStart);
       video.addEventListener('playing', onPlaying);
+      video.addEventListener('timeupdate', onProgress);
+      video.addEventListener('progress', onProgress);
+      video.addEventListener('canplay', onProgress);
+      video.addEventListener('waiting', onWaiting);
+      video.addEventListener('stalled', onWaiting);
       video.addEventListener('error', onError);
       syncCurrentSource();
     };
@@ -115,7 +211,16 @@ export default function StreamHealthObserver({ channel }: Props) {
       const video = findVideo();
       if (!video) return;
       if (video.currentSrc) syncCurrentSource();
-    }, 750);
+      if (video.paused || video.ended || successReported || failureReported || !currentUrl) return;
+      if (video.currentTime !== lastCurrentTime) {
+        lastCurrentTime = video.currentTime;
+        lastProgressAt = performance.now();
+        recoveryAttempted = false;
+        clearFreezeTimer();
+        return;
+      }
+      if (performance.now() - lastProgressAt >= FREEZE_RECOVERY_MS) scheduleFreezeCheck();
+    }, PROGRESS_POLL_MS);
 
     const observer = new MutationObserver(() => attach());
     observer.observe(document.body, { childList: true, subtree: true });
@@ -123,10 +228,16 @@ export default function StreamHealthObserver({ channel }: Props) {
     return () => {
       if (timer != null) window.clearInterval(timer);
       clearFailureTimer();
+      clearFreezeTimer();
       observer.disconnect();
       const video = findVideo();
       video?.removeEventListener('loadstart', onLoadStart);
       video?.removeEventListener('playing', onPlaying);
+      video?.removeEventListener('timeupdate', onProgress);
+      video?.removeEventListener('progress', onProgress);
+      video?.removeEventListener('canplay', onProgress);
+      video?.removeEventListener('waiting', onWaiting);
+      video?.removeEventListener('stalled', onWaiting);
       video?.removeEventListener('error', onError);
     };
   }, [channel?.id]);
