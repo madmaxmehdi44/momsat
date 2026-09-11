@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Palette, Play, RotateCcw, Settings2, Sparkles, VolumeX, Wifi } from 'lucide-react';
+import { Check, Gauge, Palette, Play, RotateCcw, Settings2, Sparkles, VolumeX } from 'lucide-react';
 import { applyAppLanguage, applyAppTheme, DEFAULT_APP_SETTINGS, loadAppSettings, saveAppSettings, type AppLanguage, type AppSettings, type AppTheme, type DefaultQuality } from '../../lib/app-settings';
 import { finishAction, startAction } from '../../lib/action-feedback';
 import styles from './settings.module.css';
@@ -64,14 +64,14 @@ export default function SettingsClient() {
     <main className={styles.page} dir="rtl">
       <div className={styles.header}>
         <div><div className={styles.eyebrow}>MOMSAT SETTINGS</div><h1>تنظیمات</h1><p>ظاهر برنامه، زبان، کیفیت پیش‌فرض و رفتار Player Pro از یک محل کنترل می‌شود.</p></div>
-        <div className={styles.actions}><button className={styles.reset} type="button" onClick={reset}><RotateCcw size={16} /> بازنشانی</button><button className={styles.save} type="button" disabled><Check size={16} /> {saved ? 'ذخیره شد' : 'ذخیره خودکار'}</button></div>
+        <div className={styles.actions}><button className={styles.reset} type="button" onClick={reset}><RotateCcw size={16} /> بازنشانی</button><div className={styles.save} aria-live="polite"><Check size={16} /> {saved ? 'تنظیمات ذخیره شد' : 'ذخیره خودکار فعال است'}</div></div>
       </div>
 
       <div className={styles.layout}>
         <section className={styles.card}>
           <div className={styles.cardTitle}><Palette size={18} /><div><h2>قالب و زبان</h2><span>ظاهر و جهت رابط کاربری</span></div></div>
           <div className={styles.settingBlock}><label>قالب</label><div className={styles.themeGrid}>{THEMES.map(([value, title, description]) => <button key={value} type="button" onClick={() => update('theme', value)} className={`${styles.theme} ${settings.theme === value ? styles.selected : ''}`}><span className={`${styles.swatch} ${styles[`swatch_${value}`]}`} /><span><strong>{title}</strong><small>{description}</small></span>{settings.theme === value ? <Check size={16} /> : null}</button>)}</div></div>
-          <div className={styles.settingBlock}><label htmlFor="language">زبان رابط کاربری</label><select id="language" value={settings.language} onChange={(event) => update('language', event.target.value as AppLanguage)}><option value="fa">فارسی</option><option value="en">English</option></select><small className={styles.note}>تغییرات این بخش فوراً اعمال و روی همین دستگاه ذخیره می‌شوند.</small></div>
+          <div className={styles.settingBlock}><label htmlFor="language">زبان رابط کاربری</label><select id="language" value={settings.language} onChange={(event) => update('language', event.target.value as AppLanguage)}><option value="fa">فارسی</option><option value="en">English</option></select><small className={styles.note}>زبان سند و جهت رابط فوراً تغییر می‌کند؛ ترجمهٔ محتوای صفحات به‌صورت تدریجی تکمیل می‌شود.</small></div>
         </section>
 
         <section className={styles.card}>
@@ -81,10 +81,9 @@ export default function SettingsClient() {
             <div className={styles.row}><div><strong>شروع بی‌صدا</strong><small>شروع امن برای بارگذاری اولیه صفحه.</small></div><Toggle value={settings.mutedStart} onChange={() => update('mutedStart', !settings.mutedStart)} /></div>
             <div className={styles.row}><div><strong>حالت سینمایی</strong><small>پلیر فضای بیشتری از صفحه را استفاده کند.</small></div><Toggle value={settings.theaterMode} onChange={() => update('theaterMode', !settings.theaterMode)} /></div>
             <div className={styles.row}><div><strong>آمار فنی</strong><small>رزولوشن، بافر و وضعیت فنی نمایش داده شود.</small></div><Toggle value={settings.showTechnicalStats} onChange={() => update('showTechnicalStats', !settings.showTechnicalStats)} /></div>
-            <div className={styles.row}><div><strong>Low Latency</strong><small>برای استریم‌های سازگار، تأخیر کمتر.</small></div><Toggle value={settings.lowLatency} onChange={() => update('lowLatency', !settings.lowLatency)} /></div>
-            <div className={styles.row}><div><strong>Auto Failover</strong><small>در خرابی منبع، مسیر بعدی امتحان شود.</small></div><Toggle value={settings.autoFailover} onChange={() => update('autoFailover', !settings.autoFailover)} /></div>
             <div className={styles.selectRow}><div><strong>سرعت پخش</strong><small>سرعت پیش‌فرض برای محتوای قابل کنترل.</small></div><select value={settings.playbackRate} onChange={(event) => update('playbackRate', Number(event.target.value))}>{[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}</select></div>
           </div>
+          <div className={styles.notice}>تنظیمات شبکه مانند Low Latency و Auto Failover در موتور پخش مدیریت می‌شوند و فعلاً از این صفحه قابل تغییر نیستند.</div>
         </section>
 
         <section className={styles.card}>
@@ -97,9 +96,9 @@ export default function SettingsClient() {
         <section className={styles.card}>
           <div className={styles.cardTitle}><Settings2 size={18} /><div><h2>پروفایل‌های آماده</h2><span>تغییر چند تنظیم با یک انتخاب</span></div></div>
           <div className={styles.profiles}>
-            <button type="button" onClick={() => updateProfile({ lowLatency: true, autoFailover: true, defaultQuality: '720', mutedStart: true })}><Wifi size={18} /><strong>اتصال ضعیف</strong><small>720p · Low Latency · Failover</small></button>
-            <button type="button" onClick={() => updateProfile({ lowLatency: false, autoFailover: true, defaultQuality: '1080' })}><Play size={18} /><strong>متعادل</strong><small>1080p · پایدار</small></button>
-            <button type="button" onClick={() => updateProfile({ lowLatency: false, autoFailover: true, defaultQuality: '2160' })}><VolumeX size={18} /><strong>بیشترین کیفیت</strong><small>اولویت رزولوشن · Failover</small></button>
+            <button type="button" onClick={() => updateProfile({ defaultQuality: '720', mutedStart: true })}><Gauge size={18} /><strong>اتصال ضعیف</strong><small>720p · شروع بی‌صدا</small></button>
+            <button type="button" onClick={() => updateProfile({ defaultQuality: '1080' })}><Play size={18} /><strong>متعادل</strong><small>1080p · پایدار</small></button>
+            <button type="button" onClick={() => updateProfile({ defaultQuality: '2160' })}><VolumeX size={18} /><strong>بیشترین کیفیت</strong><small>اولویت رزولوشن</small></button>
           </div>
         </section>
       </div>
