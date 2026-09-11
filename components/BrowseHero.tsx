@@ -20,20 +20,20 @@ export default function BrowseHero({ channels }: Props) {
   return (
     <>
       {preload.slice(0, 3).map((channel) => channel.image ? <link key={channel.id} rel="preload" as="image" href={channel.image} /> : null)}
-      <section className={styles.hero} aria-label="شبکه منتخب">
+      <section className={styles.hero} aria-label="شبکه‌های منتخب">
         <div className={styles.backdrop} style={hero.image ? { backgroundImage: `url("${hero.image.replace(/"/g, '%22')}")` } : undefined} />
         <div className={styles.content}>
-          <div className={styles.kicker}>MOMSAT · شبکه منتخب</div>
+          <div className={styles.kicker}>MOMSAT · شبکه‌های منتخب</div>
           <div className={styles.grid}>
             <div className={styles.copy}>
-              <span className={styles.live}><i /> LIVE CATALOG</span>
+              <span className={styles.live}><i /> SELECTED NETWORK</span>
               <h2>{hero.name}</h2>
-              <p>{hero.nameEn || 'Live television'}</p>
+              <p>{hero.nameEn || 'Selected live television'}</p>
               <div className={styles.meta}>
                 <span>{hero.category || 'شبکه تلویزیونی'}</span>
                 {hero.country ? <span>{hero.country}</span> : null}
                 {hero.satellite ? <span>ماهواره‌ای</span> : null}
-                <span>{hero.sources?.length ?? 0} منبع</span>
+                <span>{hero.sources?.length ?? 0} منبع فعال</span>
               </div>
               <div className={styles.actions}>
                 <Link className={styles.primary} href={`/channel/${hero.id}`}>تماشا</Link>
