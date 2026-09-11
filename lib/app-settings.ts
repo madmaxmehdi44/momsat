@@ -1,6 +1,7 @@
 export type AppTheme = 'midnight' | 'light' | 'aurora';
 export type AppLanguage = 'fa' | 'en';
 export type DefaultQuality = 'auto' | '2160' | '1440' | '1080' | '720' | '480' | '360';
+export type AppFit = 'contain' | 'cover' | 'fill';
 
 export type AppSettings = {
   theme: AppTheme;
@@ -10,6 +11,7 @@ export type AppSettings = {
   mutedStart: boolean;
   volume: number;
   theaterMode: boolean;
+  fit: AppFit;
   showTechnicalStats: boolean;
   lowLatency: boolean;
   autoFailover: boolean;
@@ -28,6 +30,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   mutedStart: true,
   volume: 0.82,
   theaterMode: false,
+  fit: 'contain',
   showTechnicalStats: false,
   lowLatency: false,
   autoFailover: true,
@@ -46,6 +49,10 @@ function isQuality(value: unknown): value is DefaultQuality {
   return value === 'auto' || value === '2160' || value === '1440' || value === '1080' || value === '720' || value === '480' || value === '360';
 }
 
+function isFit(value: unknown): value is AppFit {
+  return value === 'contain' || value === 'cover' || value === 'fill';
+}
+
 function sanitizeSettings(input: Partial<AppSettings> | null | undefined): AppSettings {
   const source = input ?? {};
   const volume = Number(source.volume);
@@ -57,6 +64,7 @@ function sanitizeSettings(input: Partial<AppSettings> | null | undefined): AppSe
     mutedStart: typeof source.mutedStart === 'boolean' ? source.mutedStart : DEFAULT_APP_SETTINGS.mutedStart,
     volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : DEFAULT_APP_SETTINGS.volume,
     theaterMode: typeof source.theaterMode === 'boolean' ? source.theaterMode : DEFAULT_APP_SETTINGS.theaterMode,
+    fit: isFit(source.fit) ? source.fit : DEFAULT_APP_SETTINGS.fit,
     showTechnicalStats: typeof source.showTechnicalStats === 'boolean' ? source.showTechnicalStats : DEFAULT_APP_SETTINGS.showTechnicalStats,
     lowLatency: typeof source.lowLatency === 'boolean' ? source.lowLatency : DEFAULT_APP_SETTINGS.lowLatency,
     autoFailover: typeof source.autoFailover === 'boolean' ? source.autoFailover : DEFAULT_APP_SETTINGS.autoFailover,
