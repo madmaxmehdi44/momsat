@@ -105,15 +105,16 @@ export default function PlayerProEnhanced({ channel }: { channel: { id?: number;
   }, [getVideo]);
 
   const toggleMute = useCallback(() => {
-    update({ mutedStart: !preferences.mutedStart });
-  }, [preferences.mutedStart, update]);
+    const nextMuted = !preferences.mutedStart;
+    update({ mutedStart: nextMuted, volume: !nextMuted && preferences.volume === 0 ? 0.82 : preferences.volume });
+  }, [preferences.mutedStart, preferences.volume, update]);
 
   const setVolume = useCallback((next: number) => {
     update({ volume: next, mutedStart: next === 0 });
   }, [update]);
 
   return (
-    <div ref={shellRef} className="player-pro-enhanced-shell">
+    <div ref={shellRef} className={`${styles.shell}${preferences.theaterMode ? ` ${styles.theater}` : ''} player-pro-enhanced-shell`}>
       <PlayerPro channel={channel} />
       {preferences.showTechnicalStats && <div className={styles.stats} dir="ltr"><span>{stats.resolution}</span><span>buffer {stats.buffered.toFixed(1)}s</span><span>ready {stats.readyState}</span><span>t {stats.currentTime.toFixed(1)}s</span></div>}
       <div className={`${styles.toolbar} player-pro-enhanced-toolbar`} dir="rtl">
