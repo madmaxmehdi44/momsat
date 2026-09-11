@@ -3,6 +3,7 @@ import BrowserCompatibility from '../components/BrowserCompatibility';
 import InteractionFeedback from '../components/InteractionFeedback';
 import MomsatAppChrome from '../components/MomsatAppChrome';
 import PersistentPlayerProvider from '../components/PersistentPlayerProvider';
+import BrowsePlayerGuard from '../components/BrowsePlayerGuard';
 
 export const metadata = {
   title: 'MOMSAT — Persian Live TV',
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <BrowserCompatibility />
         <PersistentPlayerProvider>
+          <BrowsePlayerGuard />
           <MomsatAppChrome>{children}</MomsatAppChrome>
         </PersistentPlayerProvider>
         <InteractionFeedback />
