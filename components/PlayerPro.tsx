@@ -83,6 +83,10 @@ const EMPTY_METRICS: Metrics = {
   totalBytes: 0,
 };
 
+const PROXY_FALLBACK_MS = 2500;
+const METRICS_POLL_MS = 2000;
+const PERSIST_INTERVAL_MS = 10000;
+
 function usable(url: string) {
   return /^https?:\/\//i.test(url.trim());
 }
@@ -380,18 +384,18 @@ export default function PlayerPro({ channel }: { channel: Channel }) {
           const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
-            backBufferLength: 30,
-            maxBufferLength: 45,
-            maxMaxBufferLength: 90,
-            liveSyncDurationCount: 4,
-            liveMaxLatencyDurationCount: 12,
-            maxLiveSyncPlaybackRate: 1.15,
-            manifestLoadingMaxRetry: 2,
-            levelLoadingMaxRetry: 3,
-            fragLoadingMaxRetry: 3,
-            manifestLoadingTimeOut: 12000,
-            levelLoadingTimeOut: 12000,
-            fragLoadingTimeOut: 15000,
+            backBufferLength: 20,
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 8,
+            maxLiveSyncPlaybackRate: 1.1,
+            manifestLoadingMaxRetry: 1,
+            levelLoadingMaxRetry: 2,
+            fragLoadingMaxRetry: 2,
+            manifestLoadingTimeOut: 8000,
+            levelLoadingTimeOut: 8000,
+            fragLoadingTimeOut: 10000,
             capLevelToPlayerSize: true,
             startLevel: -1,
             maxBufferHole: 0.8,
@@ -469,7 +473,7 @@ export default function PlayerPro({ channel }: { channel: Channel }) {
               setError('این مسیر در دسترس نیست؛ مسیر بعدی…');
               retryTimerRef.current = setTimeout(() => {
                 if (!cancelled && epoch === epochRef.current) chooseSource(sourceIndex + 1);
-              }, 700);
+              }, 500);
               return;
             }
 
@@ -519,7 +523,7 @@ export default function PlayerPro({ channel }: { channel: Channel }) {
       if (sourceIndex + 1 < sources.length) {
         retryTimerRef.current = setTimeout(() => {
           if (!cancelled && epoch === epochRef.current) chooseSource(sourceIndex + 1);
-        }, 700);
+        }, 500);
       } else {
         setLoading(false);
         setError('پخش این مسیر با خطا متوقف شد.');
@@ -551,7 +555,7 @@ export default function PlayerPro({ channel }: { channel: Channel }) {
           destroy();
           startHls(directUrl, 'direct');
         }
-      }, 9000);
+      }, PROXY_FALLBACK_MS);
     }
 
     const onVisibility = () => {
@@ -595,7 +599,7 @@ export default function PlayerPro({ channel }: { channel: Channel }) {
       };
       metricsRef.current = next;
       setMetrics(next);
-    }, 1000);
+    }, METRICS_POLL_MS);
     return () => {
       if (metricTimerRef.current) clearInterval(metricTimerRef.current);
     };
@@ -603,7 +607,7 @@ export default function PlayerPro({ channel }: { channel: Channel }) {
 
   useEffect(() => {
     if (persistTimerRef.current) clearInterval(persistTimerRef.current);
-    persistTimerRef.current = setInterval(() => { void persistSession(false); }, 10000);
+    persistTimerRef.current = setInterval(() => { void persistSession(false); }, PERSIST_INTERVAL_MS);
     return () => {
       if (persistTimerRef.current) clearInterval(persistTimerRef.current);
     };
