@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { discoverMediaSources, isSafePublicUrl } from '../../../../lib/web-source-extractor';
-import { ttlGetOrSet } from '../../../../lib/ttl-cache';
+import { redisGetOrSet } from '../../../../lib/redis-cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
           visitedPages: [],
           errors: [],
         }
-      : await ttlGetOrSet(`momsat:resolve:v2:${target}`, RESOLVE_TTL_MS, () => discoverMediaSources(target));
+      : await redisGetOrSet(`stream-resolve:v2:${target}`, RESOLVE_TTL_MS, () => discoverMediaSources(target));
 
     return NextResponse.json({
       ok: result.sources.length > 0,
@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'cache-control': 'public, s-maxage=60, stale-while-revalidate=120',
         'access-control-allow-origin': '*',
+        'x-momsat-cache': 'redis-metadata-v1',
       },
     });
   } catch (error) {
