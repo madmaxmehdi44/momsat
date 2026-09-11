@@ -8,6 +8,7 @@ export type AppSettings = {
   defaultQuality: DefaultQuality;
   autoplay: boolean;
   mutedStart: boolean;
+  volume: number;
   theaterMode: boolean;
   showTechnicalStats: boolean;
   lowLatency: boolean;
@@ -25,6 +26,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultQuality: 'auto',
   autoplay: true,
   mutedStart: true,
+  volume: 0.82,
   theaterMode: false,
   showTechnicalStats: false,
   lowLatency: false,
@@ -46,12 +48,14 @@ function isQuality(value: unknown): value is DefaultQuality {
 
 function sanitizeSettings(input: Partial<AppSettings> | null | undefined): AppSettings {
   const source = input ?? {};
+  const volume = Number(source.volume);
   return {
     theme: isTheme(source.theme) ? source.theme : DEFAULT_APP_SETTINGS.theme,
     language: isLanguage(source.language) ? source.language : DEFAULT_APP_SETTINGS.language,
     defaultQuality: isQuality(source.defaultQuality) ? source.defaultQuality : DEFAULT_APP_SETTINGS.defaultQuality,
     autoplay: typeof source.autoplay === 'boolean' ? source.autoplay : DEFAULT_APP_SETTINGS.autoplay,
     mutedStart: typeof source.mutedStart === 'boolean' ? source.mutedStart : DEFAULT_APP_SETTINGS.mutedStart,
+    volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : DEFAULT_APP_SETTINGS.volume,
     theaterMode: typeof source.theaterMode === 'boolean' ? source.theaterMode : DEFAULT_APP_SETTINGS.theaterMode,
     showTechnicalStats: typeof source.showTechnicalStats === 'boolean' ? source.showTechnicalStats : DEFAULT_APP_SETTINGS.showTechnicalStats,
     lowLatency: typeof source.lowLatency === 'boolean' ? source.lowLatency : DEFAULT_APP_SETTINGS.lowLatency,
