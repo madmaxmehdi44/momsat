@@ -1,3 +1,5 @@
+import { fallbackChannelThumbnail } from './fallback-thumbnail';
+
 const THUMBNAILS: Array<{ test: RegExp; url: string }> = [
   {
     test: /iran\s*international|ایران\s*اینترنشنال/i,
@@ -28,6 +30,8 @@ export function getChannelThumbnail(name?: string | null): string | null {
 }
 
 export function ensureChannelThumbnail(name: string | null | undefined, image: string | null | undefined): string | null {
+  const value = name?.trim() || 'MOMSAT';
   const existing = image?.trim();
-  return existing || getChannelThumbnail(name) || null;
+  if (existing && /^(data:|blob:|\/)/i.test(existing)) return existing;
+  return getChannelThumbnail(value) || fallbackChannelThumbnail(value);
 }
