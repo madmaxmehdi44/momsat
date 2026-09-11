@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import PlayerProEnhanced from './PlayerProEnhanced';
 import StreamAccelerator from './StreamAccelerator';
 import styles from './PersistentPlayerProvider.module.css';
@@ -36,6 +37,12 @@ function channelKey(channel: PersistentChannel) {
   });
 }
 
+function isCurrentChannelPage(pathname: string | null, channel: PersistentChannel | null) {
+  if (!pathname || channel?.id == null) return false;
+  const normalized = pathname.replace(/\/+$/, '');
+  return normalized === `/channel/${channel.id}`;
+}
+
 export function usePersistentPlayer() {
   const value = useContext(PersistentPlayerContext);
   if (!value) throw new Error('usePersistentPlayer must be used inside PersistentPlayerProvider');
@@ -43,8 +50,11 @@ export function usePersistentPlayer() {
 }
 
 export default function PersistentPlayerProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [activeChannel, setActiveChannelState] = useState<PersistentChannel | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+
+  const expanded = isCurrentChannelPage(pathname, activeChannel);
 
   useEffect(() => {
     try {
@@ -53,40 +63,41 @@ export default function PersistentPlayerProvider({ children }: { children: React
     } catch {}
   }, []);
 
-  const setActiveChannel = (channel: PersistentChannel) => {
+  const setActiveChannel = useCallback((channel: PersistentChannel) => {
     setCollapsed(false);
     setActiveChannelState((current) => {
       if (current && channelKey(current) === channelKey(channel)) return current;
       return channel;
     });
-  };
+  }, []);
 
-  const stopPlayer = () => {
+  const stopPlayer = useCallback(() => {
     setCollapsed(true);
     try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
-  };
+  }, []);
 
   useEffect(() => {
-    document.body.style.paddingBottom = activeChannel && !collapsed ? '208px' : '';
+    document.body.style.paddingBottom = activeChannel && !collapsed && !expanded ? '112px' : '';
     return () => { document.body.style.paddingBottom = ''; };
-  }, [activeChannel, collapsed]);
+  }, [activeChannel, collapsed, expanded]);
 
   useEffect(() => {
     if (!activeChannel || collapsed) return;
     try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(activeChannel)); } catch {}
   }, [activeChannel, collapsed]);
 
-  const value = useMemo(() => ({ activeChannel, setActiveChannel, stopPlayer }), [activeChannel]);
+  const value = useMemo(() => ({ activeChannel, setActiveChannel, stopPlayer }), [activeChannel, setActiveChannel, stopPlayer]);
 
   return (
     <PersistentPlayerContext.Provider value={value}>
       {children}
       {activeChannel && !collapsed ? (
-        <aside className={styles.root} aria-label="MOMSAT player">
+        <aside className={`${styles.root} ${expanded ? styles.expanded : styles.mini}`} aria-label="MOMSAT player">
           <div className={styles.inner}>
             <StreamAccelerator urls={(activeChannel.sources ?? []).map((source) => source.url)} />
             <PlayerProEnhanced channel={activeChannel} />
             <button className={styles.close} type="button" onClick={stopPlayer} aria-label="بستن پلیر شناور">×</button>
+            {!expanded && <div className={styles.nowPlaying} dir="rtl"><strong>{activeChannel.name || 'MOMSAT'}</strong><span>در حال پخش</span></div>}
           </div>
         </aside>
       ) : null}
