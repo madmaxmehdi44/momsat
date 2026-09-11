@@ -18,19 +18,9 @@ function loadPreferences(): Preferences {
   try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<Preferences>) }; } catch { return DEFAULTS; }
 }
 
-function applyDefaultQuality(root: HTMLDivElement | null, settings: AppSettings) {
-  if (!root || settings.defaultQuality === 'auto') return;
-  const hdButton = Array.from(root.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'HD') as HTMLButtonElement | undefined;
-  if (!hdButton) return;
-  hdButton.click();
-  const wanted = `${settings.defaultQuality}p`;
-  const options = Array.from(root.querySelectorAll('.quality-menu-pro button')) as HTMLButtonElement[];
-  const match = options.find((button) => button.textContent?.includes(wanted));
-  if (match) match.click();
-}
-
 export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
   const shellRef = useRef<HTMLDivElement>(null);
+  const qualityApplyStarted = useRef(false);
   const [preferences, setPreferences] = useState<Preferences>(DEFAULTS);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -48,10 +38,11 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
   useEffect(() => {
     const onSettings = (event: Event) => {
       const custom = event as CustomEvent<AppSettings>;
-      setAppSettings(custom.detail || loadAppSettings());
       const next = custom.detail || loadAppSettings();
+      setAppSettings(next);
       setPreferences((current) => ({ ...current, autoplay: next.autoplay, mutedStart: next.mutedStart, theater: next.theaterMode, showStats: next.showTechnicalStats, playbackRate: next.playbackRate }));
       setMuted(next.mutedStart);
+      qualityApplyStarted.current = false;
     };
     window.addEventListener('momsat-settings-changed', onSettings);
     return () => window.removeEventListener('momsat-settings-changed', onSettings);
@@ -78,13 +69,27 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
   }, [getVideo, muted, preferences.autoplay, preferences.fit, preferences.playbackRate, volume]);
 
   useEffect(() => {
-    if (!appSettings || !shellRef.current) return;
+    if (!appSettings || appSettings.defaultQuality === 'auto' || !shellRef.current) return;
+    qualityApplyStarted.current = false;
     let attempts = 0;
     const timer = window.setInterval(() => {
-      applyDefaultQuality(shellRef.current, appSettings);
+      const root = shellRef.current;
+      if (!root) return;
+      const buttons = Array.from(root.querySelectorAll('button')) as HTMLButtonElement[];
+      const menu = root.querySelector('.quality-menu-pro');
+      if (!menu && !qualityApplyStarted.current) {
+        const hdButton = buttons.find((button) => button.textContent?.trim() === 'HD');
+        if (hdButton) { qualityApplyStarted.current = true; hdButton.click(); }
+      }
+      const options = Array.from(root.querySelectorAll('.quality-menu-pro button')) as HTMLButtonElement[];
+      if (options.length) {
+        const wanted = `${appSettings.defaultQuality}p`;
+        const match = options.find((button) => button.textContent?.includes(wanted));
+        if (match) { match.click(); window.clearInterval(timer); return; }
+      }
       attempts += 1;
-      if (appSettings.defaultQuality === 'auto' || attempts >= 12) window.clearInterval(timer);
-    }, 450);
+      if (attempts >= 14) window.clearInterval(timer);
+    }, 350);
     return () => window.clearInterval(timer);
   }, [appSettings, channel.id]);
 
@@ -104,6 +109,7 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
     if (!video) return;
     video.pause();
     video.load();
+    qualityApplyStarted.current = false;
     if (preferences.autoplay) void video.play().catch(() => undefined);
   }, [getVideo, preferences.autoplay]);
 
@@ -139,7 +145,6 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
         <button onClick={pip} title="Picture in Picture"><PictureInPicture2 size={17} /> PiP</button>
         <button onClick={fullscreen} title="تمام صفحه"><Maximize2 size={17} /> تمام صفحه</button>
       </div>
-
       {settingsOpen && <div className={styles.panel} dir="rtl">
         <div className={styles.panelHeader}><div><strong>تنظیمات Player Pro</strong><span>تنظیمات این مرورگر ذخیره می‌شوند</span></div><button onClick={() => setSettingsOpen(false)} aria-label="بستن"><X size={18} /></button></div>
         <section><h4><MonitorPlay size={16} /> پخش</h4><button className={preferences.autoplay ? styles.active : ''} onClick={() => update({ autoplay: !preferences.autoplay })}><span>پخش خودکار</span>{preferences.autoplay ? <Check size={16} /> : null}</button><button className={preferences.mutedStart ? styles.active : ''} onClick={() => { const next = !preferences.mutedStart; update({ mutedStart: next }); setMuted(next); }}><span>شروع بی‌صدا</span>{preferences.mutedStart ? <Check size={16} /> : null}</button><div className={styles.row}><span>سرعت پخش</span><select value={preferences.playbackRate} onChange={(event) => update({ playbackRate: Number(event.target.value) })}>{[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}</select></div></section>
