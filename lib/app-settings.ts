@@ -15,26 +15,104 @@ export type AppSettings = {
   playbackRate: number;
 };
 
-export const APP_SETTINGS_KEY = 'momsat.settings.v1';
+export const APP_SETTINGS_KEY = 'momsat.settings.v2';
+const LEGACY_APP_SETTINGS_KEY = 'momsat.settings.v1';
+const SETTINGS_EVENT = 'momsat-settings-changed';
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
-  theme: 'midnight', language: 'fa', defaultQuality: 'auto', autoplay: true, mutedStart: true,
-  theaterMode: false, showTechnicalStats: false, lowLatency: false, autoFailover: true, playbackRate: 1,
+  theme: 'midnight',
+  language: 'fa',
+  defaultQuality: 'auto',
+  autoplay: true,
+  mutedStart: true,
+  theaterMode: false,
+  showTechnicalStats: false,
+  lowLatency: false,
+  autoFailover: true,
+  playbackRate: 1,
 };
+
+function isTheme(value: unknown): value is AppTheme {
+  return value === 'midnight' || value === 'light' || value === 'aurora';
+}
+
+function isLanguage(value: unknown): value is AppLanguage {
+  return value === 'fa' || value === 'en';
+}
+
+function isQuality(value: unknown): value is DefaultQuality {
+  return value === 'auto' || value === '2160' || value === '1440' || value === '1080' || value === '720' || value === '480' || value === '360';
+}
+
+function sanitizeSettings(input: Partial<AppSettings> | null | undefined): AppSettings {
+  const source = input ?? {};
+  return {
+    theme: isTheme(source.theme) ? source.theme : DEFAULT_APP_SETTINGS.theme,
+    language: isLanguage(source.language) ? source.language : DEFAULT_APP_SETTINGS.language,
+    defaultQuality: isQuality(source.defaultQuality) ? source.defaultQuality : DEFAULT_APP_SETTINGS.defaultQuality,
+    autoplay: typeof source.autoplay === 'boolean' ? source.autoplay : DEFAULT_APP_SETTINGS.autoplay,
+    mutedStart: typeof source.mutedStart === 'boolean' ? source.mutedStart : DEFAULT_APP_SETTINGS.mutedStart,
+    theaterMode: typeof source.theaterMode === 'boolean' ? source.theaterMode : DEFAULT_APP_SETTINGS.theaterMode,
+    showTechnicalStats: typeof source.showTechnicalStats === 'boolean' ? source.showTechnicalStats : DEFAULT_APP_SETTINGS.showTechnicalStats,
+    lowLatency: typeof source.lowLatency === 'boolean' ? source.lowLatency : DEFAULT_APP_SETTINGS.lowLatency,
+    autoFailover: typeof source.autoFailover === 'boolean' ? source.autoFailover : DEFAULT_APP_SETTINGS.autoFailover,
+    playbackRate: [0.5, 0.75, 1, 1.25, 1.5, 2].includes(Number(source.playbackRate)) ? Number(source.playbackRate) : DEFAULT_APP_SETTINGS.playbackRate,
+  };
+}
+
+function readStoredSettings(storageKey: string): AppSettings | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    return sanitizeSettings(JSON.parse(raw) as Partial<AppSettings>);
+  } catch {
+    return null;
+  }
+}
 
 export function loadAppSettings(): AppSettings {
   if (typeof window === 'undefined') return DEFAULT_APP_SETTINGS;
-  try {
-    const parsed = JSON.parse(localStorage.getItem(APP_SETTINGS_KEY) || '{}') as Partial<AppSettings>;
-    return { ...DEFAULT_APP_SETTINGS, ...parsed };
-  } catch { return DEFAULT_APP_SETTINGS; }
+  const current = readStoredSettings(APP_SETTINGS_KEY);
+  if (current) return current;
+
+  const legacy = readStoredSettings(LEGACY_APP_SETTINGS_KEY);
+  if (legacy) {
+    try { localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(legacy)); } catch {}
+    return legacy;
+  }
+
+  return DEFAULT_APP_SETTINGS;
 }
 
 export function saveAppSettings(settings: AppSettings) {
+  if (typeof window === 'undefined') return;
+  const next = sanitizeSettings(settings);
   try {
-    localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
-    window.dispatchEvent(new CustomEvent('momsat-settings-changed', { detail: settings }));
+    localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(next));
+    localStorage.removeItem(LEGACY_APP_SETTINGS_KEY);
   } catch {}
+  window.dispatchEvent(new CustomEvent<AppSettings>(SETTINGS_EVENT, { detail: next }));
+}
+
+export function subscribeAppSettings(listener: (settings: AppSettings) => void): () => void {
+  if (typeof window === 'undefined') return () => undefined;
+
+  const onCustom = (event: Event) => {
+    const custom = event as CustomEvent<AppSettings>;
+    listener(sanitizeSettings(custom.detail));
+  };
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== APP_SETTINGS_KEY) return;
+    listener(loadAppSettings());
+  };
+
+  window.addEventListener(SETTINGS_EVENT, onCustom);
+  window.addEventListener('storage', onStorage);
+  return () => {
+    window.removeEventListener(SETTINGS_EVENT, onCustom);
+    window.removeEventListener('storage', onStorage);
+  };
 }
 
 export function applyAppTheme(theme: AppTheme) {
