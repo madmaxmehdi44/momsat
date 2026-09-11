@@ -17,7 +17,8 @@ export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   const raw = req.nextUrl.searchParams.get('status');
   if (raw && !validStatus(raw)) return NextResponse.json({ ok: false, error: 'Invalid status' }, { status: 400 });
-  const channels = await getHistoricalChannels(raw ? raw : undefined);
+  const status = raw ? (raw as HistoricalStatus) : undefined;
+  const channels = await getHistoricalChannels(status);
   return NextResponse.json({ ok: true, channels, count: channels.length });
 }
 
