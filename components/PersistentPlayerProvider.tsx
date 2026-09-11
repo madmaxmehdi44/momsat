@@ -17,6 +17,25 @@ type PersistentPlayerContextValue = {
 const STORAGE_KEY = 'momsat.persistent-player.v1';
 const PersistentPlayerContext = createContext<PersistentPlayerContextValue | null>(null);
 
+function channelKey(channel: PersistentChannel) {
+  return JSON.stringify({
+    id: channel.id ?? null,
+    name: channel.name ?? '',
+    image: channel.image ?? null,
+    url: channel.url ?? null,
+    referer: channel.referer ?? null,
+    origin: channel.origin ?? null,
+    sources: (channel.sources ?? []).map((source) => ({
+      url: source.url,
+      title: source.title ?? null,
+      referer: source.referer ?? null,
+      origin: source.origin ?? null,
+      country: source.country ?? null,
+      vip: source.vip ?? false,
+    })),
+  });
+}
+
 export function usePersistentPlayer() {
   const value = useContext(PersistentPlayerContext);
   if (!value) throw new Error('usePersistentPlayer must be used inside PersistentPlayerProvider');
@@ -36,7 +55,10 @@ export default function PersistentPlayerProvider({ children }: { children: React
 
   const setActiveChannel = (channel: PersistentChannel) => {
     setCollapsed(false);
-    setActiveChannelState(channel);
+    setActiveChannelState((current) => {
+      if (current && channelKey(current) === channelKey(channel)) return current;
+      return channel;
+    });
   };
 
   const stopPlayer = () => {
