@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, Database, History, Radio, UploadCloud, RefreshCw } from 'lucide-react';
+import { Activity, Database, History, Radio, UploadCloud, RefreshCw, ScanSearch } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { subscribeActionFeedback, type ActionFeedbackPayload } from '../../lib/action-feedback';
 import styles from './control-center.module.css';
 
 const items = [
   { href: '/admin', label: 'کاتالوگ و Import', icon: UploadCloud, exact: true },
+  { href: '/admin/stream-validator', label: 'صحت‌سنجی استریم', icon: ScanSearch },
   { href: '/admin/stream-health', label: 'سلامت استریم', icon: Radio },
   { href: '/admin/historical', label: 'آرشیو تاریخی', icon: History },
 ];
