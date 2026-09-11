@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 type Item = { id: number; name: string; nameEn: string; archiveStatus: 'MEMORY' | 'SHUTDOWN' | null; archiveNote: string | null; archiveSince: string | null };
 
+type RequestHeaders = Record<string, string>;
+
 export default function HistoricalAdmin() {
   const [items, setItems] = useState<Item[]>([]);
   const [token, setToken] = useState('');
@@ -11,7 +13,7 @@ export default function HistoricalAdmin() {
   const [saving, setSaving] = useState<number | null>(null);
   const [error, setError] = useState('');
 
-  const headers = useCallback(() => token.trim() ? { 'x-admin-token': token.trim() } : {}, [token]);
+  const headers = useCallback((): RequestHeaders => token.trim() ? { 'x-admin-token': token.trim() } : {}, [token]);
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try { const response = await fetch('/api/admin/historical', { headers: headers(), cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'خطا در دریافت آرشیو'); setItems(data.channels || []); }
