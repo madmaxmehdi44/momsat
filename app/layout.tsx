@@ -1,5 +1,6 @@
 import './globals.css';
 import InteractionFeedback from '../components/InteractionFeedback';
+import PersistentPlayerProvider from '../components/PersistentPlayerProvider';
 
 export const metadata = {
   title: 'MOMSAT — Persian Live TV',
@@ -10,7 +11,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="fa" dir="rtl">
       <body>
-        {children}
+        <PersistentPlayerProvider>
+          {children}
+        </PersistentPlayerProvider>
         <InteractionFeedback />
       </body>
     </html>
