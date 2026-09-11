@@ -2,7 +2,7 @@
 
 import { Check, LoaderCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { subscribeActionFeedback, type ActionFeedbackPayload } from '../lib/action-feedback';
+import { installGlobalActionPipeline, subscribeActionFeedback, type ActionFeedbackPayload } from '../lib/action-feedback';
 import styles from './InteractionFeedback.module.css';
 import { usePathname } from 'next/navigation';
 
@@ -12,17 +12,24 @@ export default function InteractionFeedback() {
   const [navId, setNavId] = useState<string | null>(null);
   const [navHref, setNavHref] = useState<string | null>(null);
 
-  useEffect(() => subscribeActionFeedback((payload) => {
-    setActions((current) => {
-      if (payload.status === 'start') return { ...current, [payload.id]: payload };
-      const next = { ...current };
-      const previous = next[payload.id];
-      if (!previous) return current;
-      if (payload.status === 'error') next[payload.id] = { ...previous, ...payload };
-      else delete next[payload.id];
-      return next;
+  useEffect(() => {
+    const unsubscribe = subscribeActionFeedback((payload) => {
+      setActions((current) => {
+        if (payload.status === 'start') return { ...current, [payload.id]: payload };
+        const next = { ...current };
+        const previous = next[payload.id];
+        if (!previous) return current;
+        if (payload.status === 'error') next[payload.id] = { ...previous, ...payload };
+        else delete next[payload.id];
+        return next;
+      });
     });
-  }), []);
+    const uninstall = installGlobalActionPipeline();
+    return () => {
+      unsubscribe();
+      uninstall();
+    };
+  }, []);
 
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
