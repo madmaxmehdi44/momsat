@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import SettingsClient from './SettingsClient';
 
 export const metadata = {
@@ -7,10 +6,5 @@ export const metadata = {
 };
 
 export default function SettingsPage() {
-  return (
-    <>
-      <header className="top settings-top"><div><div className="brand">MOM<span>SAT</span></div><div className="muted">Persian Live TV Discovery</div></div><nav><Link href="/browse">شبکه‌ها</Link><Link href="/guide">راهنما</Link><Link href="/settings">تنظیمات</Link><Link href="/admin">مدیریت</Link></nav></header>
-      <SettingsClient />
-    </>
-  );
+  return <SettingsClient />;
 }
