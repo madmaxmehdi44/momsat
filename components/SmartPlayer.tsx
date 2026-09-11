@@ -1,13 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import PlayerProEnhanced from './PlayerProEnhanced';
-import StreamAccelerator from './StreamAccelerator';
+import { usePersistentPlayer, type PersistentChannel } from './PersistentPlayerProvider';
 import { clientCacheGet, clientCacheSet } from '../lib/client-cache';
 import styles from './SmartPlayer.module.css';
 
 type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
-type Channel = { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
+type Channel = PersistentChannel;
 type ResolvedSource = Source & { discoveredFrom?: string; depth?: number };
 type ProbeResult = { ok?: boolean; playable?: boolean; latencyMs?: number };
 
@@ -65,6 +64,7 @@ async function verifySources(sources: Source[]) {
 }
 
 export default function SmartPlayer({ channel }: { channel: Channel }) {
+  const { setActiveChannel } = usePersistentPlayer();
   const candidates = useMemo(() => databaseCandidates(channel), [channel.id, channel.url, channel.referer, channel.origin, channel.sources]);
   const directCandidates = useMemo(() => candidates.filter((source) => isDirectMedia(source.url)), [candidates]);
   const pageCandidates = useMemo(() => candidates.filter((source) => !isDirectMedia(source.url)), [candidates]);
@@ -94,11 +94,24 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
     return () => { cancelled = true; };
   }, [allSources]);
 
-  const posterImage = channel.image ? `/api/channel-thumbnail?url=${encodeURIComponent(channel.image)}&name=${encodeURIComponent(channel.name || 'TV')}` : null;
-  if (allSources.length > 0) {
+  useEffect(() => {
+    if (!allSources.length) return;
     const orderedSources = [...verified, ...allSources.filter((source) => !verified.some((item) => item.url === source.url))];
     const primary = orderedSources[0];
-    return <><StreamAccelerator urls={orderedSources.map((source) => source.url)} /><PlayerProEnhanced channel={{ ...channel, image: posterImage, url: primary.url, referer: primary.referer, origin: primary.origin, sources: orderedSources }} /></>;
+    if (!primary) return;
+    const posterImage = channel.image ? `/api/channel-thumbnail?url=${encodeURIComponent(channel.image)}&name=${encodeURIComponent(channel.name || 'TV')}` : null;
+    setActiveChannel({
+      ...channel,
+      image: posterImage,
+      url: primary.url,
+      referer: primary.referer,
+      origin: primary.origin,
+      sources: orderedSources,
+    });
+  }, [allSources, verified, channel, setActiveChannel]);
+
+  if (allSources.length > 0) {
+    return <div className={styles.persistentNotice}>پلیر هوشمند در پایین صفحه فعال است و با جابه‌جایی بین صفحات قطع نمی‌شود.</div>;
   }
   if (resolving) return <div className={styles.embedPlayer}><div className={styles.probing}>در حال استخراج مسیر پخش از دیتابیس…</div></div>;
   return <div className={styles.embedPlayer}><div className={styles.probing}>{resolutionError || 'برای این شبکه مسیر پخش در دیتابیس ثبت نشده است.'}</div></div>;
