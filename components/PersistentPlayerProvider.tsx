@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePathname } from 'next/navigation';
 import PlayerProEnhanced from './PlayerProEnhanced';
@@ -10,6 +10,7 @@ import styles from './PersistentPlayerProvider.module.css';
 type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
 export type PersistentChannel = { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
 type PlayerHostRect = { top: number; left: number; width: number; height: number };
+type CatalogResponse = { channels?: PersistentChannel[] };
 
 type PersistentPlayerContextValue = {
   activeChannel: PersistentChannel | null;
@@ -59,6 +60,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const [collapsed, setCollapsed] = useState(false);
   const [playerHost, setPlayerHost] = useState<HTMLElement | null>(null);
   const [hostRect, setHostRect] = useState<PlayerHostRect | null>(null);
+  const catalogPromiseRef = useRef<Promise<PersistentChannel[]> | null>(null);
 
   const expanded = isCurrentChannelPage(pathname, activeChannel);
 
@@ -85,6 +87,47 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const registerPlayerHost = useCallback((element: HTMLElement | null) => {
     setPlayerHost((current) => current === element ? current : element);
   }, []);
+
+  const loadCatalog = useCallback(async () => {
+    if (!catalogPromiseRef.current) {
+      catalogPromiseRef.current = fetch('/api/catalog', { cache: 'no-store' })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`catalog request failed: ${response.status}`);
+          const body = await response.json() as CatalogResponse;
+          return Array.isArray(body.channels) ? body.channels : [];
+        })
+        .finally(() => {
+          catalogPromiseRef.current = null;
+        });
+    }
+    return catalogPromiseRef.current;
+  }, []);
+
+  useEffect(() => {
+    const onChannelLinkClick = (event: MouseEvent) => {
+      if (!activeChannel || collapsed) return;
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      const target = event.target instanceof Element ? event.target.closest('a[href]') as HTMLAnchorElement | null : null;
+      if (!target) return;
+      const href = target.getAttribute('href') || '';
+      const match = href.match(/^\/channel\/(\d+)\/?(?:\?.*)?$/);
+      if (!match) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      const channelId = Number(match[1]);
+      if (!Number.isFinite(channelId)) return;
+
+      void loadCatalog().then((channels) => {
+        const channel = channels.find((item) => Number(item.id) === channelId);
+        if (channel) setActiveChannel(channel);
+      }).catch(() => undefined);
+    };
+
+    document.addEventListener('click', onChannelLinkClick, true);
+    return () => document.removeEventListener('click', onChannelLinkClick, true);
+  }, [activeChannel, collapsed, loadCatalog, setActiveChannel]);
 
   useEffect(() => {
     if (!expanded || !playerHost) {
