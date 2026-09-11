@@ -1,19 +1,18 @@
 export const dynamic = 'force-dynamic';
 
+import { notFound } from 'next/navigation';
 import { getCatalog } from '../../../lib/catalog-db';
 import YouTubeWatchPage from '../../../components/YouTubeWatchPage';
 
 export default async function ChannelPage({ params }: { params: Promise<{ id: string }> }) {
   const id = Number((await params).id);
-  if (!Number.isInteger(id) || id <= 0) return <main><h1>Channel not found</h1></main>;
+  if (!Number.isInteger(id) || id <= 0) notFound();
 
-  // Load the already-cached catalog once and derive both the requested channel
-  // and its recommendations from the same snapshot. This avoids the previous
-  // duplicate DB path where findChannel() and getCatalog() could normalize the
-  // catalog independently on every channel navigation.
+  // Load the catalog once and derive both the requested channel and its
+  // recommendations from the same snapshot.
   const catalog = await getCatalog();
   const channel = catalog.find((item) => item.id === id) ?? null;
-  if (!channel) return <main><h1>Channel not found</h1></main>;
+  if (!channel) notFound();
 
   const recommendations = catalog
     .filter((item) => item.id !== channel.id)
