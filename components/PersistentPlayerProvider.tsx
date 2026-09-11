@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { usePathname } from 'next/navigation';
 import PlayerProEnhanced from './PlayerProEnhanced';
 import StreamAccelerator from './StreamAccelerator';
+import StreamHealthObserver from './StreamHealthObserver';
 import styles from './PersistentPlayerProvider.module.css';
 
 type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
@@ -13,7 +14,7 @@ type PlayerHostRect = { top: number; left: number; width: number; height: number
 type CatalogResponse = { channels?: PersistentChannel[] };
 type MiniPosition = { left: number; top: number };
 
- type PersistentPlayerContextValue = {
+type PersistentPlayerContextValue = {
   activeChannel: PersistentChannel | null;
   expanded: boolean;
   setActiveChannel: (channel: PersistentChannel) => void;
@@ -276,6 +277,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
           role="presentation"
         />
         <StreamAccelerator urls={(activeChannel?.sources ?? []).map((source) => source.url)} />
+        <StreamHealthObserver channel={activeChannel} />
         <PlayerProEnhanced channel={activeChannel!} />
         <button className={styles.close} type="button" onClick={stopPlayer} aria-label="بستن پلیر شناور">×</button>
         {!expanded && <div className={styles.nowPlaying} dir="rtl"><strong>{activeChannel?.name || 'MOMSAT'}</strong><span>در حال پخش</span></div>}
