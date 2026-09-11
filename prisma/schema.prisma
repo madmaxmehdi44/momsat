@@ -7,6 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum ChannelArchiveStatus {
+  MEMORY
+  SHUTDOWN
+}
+
 model Category {
   id       Int       @id
   name     String
@@ -38,6 +43,9 @@ model Channel {
   categoryId      Int
   categoryName    String?
   categoryNameEn  String?
+  archiveStatus   ChannelArchiveStatus?
+  archiveNote     String?
+  archiveSince    DateTime?
   category        Category  @relation(fields: [categoryId], references: [id])
   sources         Source[]
   programs        Program[]
@@ -48,6 +56,8 @@ model Channel {
   @@index([name])
   @@index([nameEn])
   @@index([platform])
+  @@index([archiveStatus])
+  @@index([archiveStatus, archiveSince])
 }
 
 model Source {
