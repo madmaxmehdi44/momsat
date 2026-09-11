@@ -9,6 +9,7 @@ export type UniversalImportDetection = {
   confidence: number;
   reason: string;
   rows: number;
+  timings?: Record<string, number>;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -87,12 +88,17 @@ function rowsToCsv(rows: Array<Record<string, unknown>>) {
 }
 
 export async function detectAndImportUpload(fileName: string, text: string) {
+  const totalStart = Date.now();
+  const timings: Record<string, number> = {};
   const trimmed = text.replace(/^\uFEFF/, '').trim();
   if (!trimmed) throw new Error('The uploaded file is empty.');
 
   const lower = fileName.toLowerCase();
   if (lower.endsWith('.m3u') || lower.endsWith('.m3u8') || trimmed.startsWith('#EXTM3U')) {
+    const importStart = Date.now();
     const result = await importM3u(trimmed);
+    timings.import = Date.now() - importStart;
+    timings.total = Date.now() - totalStart;
     return {
       format: 'm3u' as const,
       table: 'channel' as const,
@@ -100,23 +106,41 @@ export async function detectAndImportUpload(fileName: string, text: string) {
       reason: 'M3U playlist detected from #EXTM3U / file extension; entries imported as channels with linked sources',
       rows: result.rows,
       result,
+      timings,
     };
   }
 
   if (lower.endsWith('.json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    const parseStart = Date.now();
     let payload: unknown;
     try { payload = JSON.parse(trimmed); }
     catch { throw new Error('The uploaded JSON is invalid.'); }
     const rows = jsonRows(payload);
+    timings.parse = Date.now() - parseStart;
+    const detectStart = Date.now();
     const detected = detectRows(rows);
-    const result = await importTable(detected.table, rowsToCsv(rows));
-    return { ...detected, format: 'json' as const, result };
+    timings.detect = Date.now() - detectStart;
+    const convertStart = Date.now();
+    const csv = rowsToCsv(rows);
+    timings.serialize = Date.now() - convertStart;
+    const importStart = Date.now();
+    const result = await importTable(detected.table, csv);
+    timings.import = Date.now() - importStart;
+    timings.total = Date.now() - totalStart;
+    return { ...detected, format: 'json' as const, result, timings };
   }
 
+  const parseStart = Date.now();
   const rows = parseCsv(trimmed);
+  timings.parse = Date.now() - parseStart;
+  const detectStart = Date.now();
   const detected = detectRows(rows);
+  timings.detect = Date.now() - detectStart;
+  const importStart = Date.now();
   const result = detected.table === 'source'
     ? await importSourceCsvFast(trimmed)
     : await importTable(detected.table, trimmed);
-  return { ...detected, format: 'csv' as const, result };
+  timings.import = Date.now() - importStart;
+  timings.total = Date.now() - totalStart;
+  return { ...detected, format: 'csv' as const, result, timings };
 }
