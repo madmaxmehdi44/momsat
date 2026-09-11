@@ -47,9 +47,6 @@ function toCatalog(channel: DbChannel): Channel {
     serviceId: channel.serviceId,
     category: channel.categoryName || channel.category.name,
     categoryEn: channel.categoryNameEn || channel.category.nameEn,
-    archiveStatus: channel.archiveStatus ?? null,
-    archiveNote: channel.archiveNote ?? null,
-    archiveSince: channel.archiveSince?.toISOString() ?? null,
     sources,
   };
 }
