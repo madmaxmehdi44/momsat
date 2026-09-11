@@ -5,7 +5,7 @@ import {
   noteStreamRequestEnd,
   noteStreamRequestStart,
   scheduleAppNetworkRequest,
-  setLowNetworkPriority,
+  setRequestPriority,
 } from './network-qos';
 
 export type ActionFeedbackStatus = 'start' | 'done' | 'error';
@@ -111,14 +111,15 @@ export function installGlobalActionPipeline() {
 
     if (isStreamTrafficUrl(url)) {
       noteStreamRequestStart(url);
-      const request = originalFetch(input, init);
+      const streamInit = setRequestPriority(init, 'high');
+      const request = originalFetch(input, streamInit);
       void request.finally(() => noteStreamRequestEnd(url));
       return request;
     }
 
     const label = requestLabel(url, method);
     const preparedInit = shouldQoSRequest(method, url)
-      ? setLowNetworkPriority(init, true)
+      ? setRequestPriority(init, 'low')
       : init;
 
     if (!label) {
