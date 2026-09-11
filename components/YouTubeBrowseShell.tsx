@@ -4,25 +4,26 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Bell, Clock3, Compass, Heart, Home, Menu, Play, Radio, Search, Settings, Tv, UserCircle } from 'lucide-react';
 import type { Channel } from '../lib/source';
-import { featuredSpotlightOrder } from '../lib/featured-channels';
 import styles from './YouTubeBrowseShell.module.css';
 
 type Props = { channels: Channel[]; initialQuery?: string; initialCategory?: string; initialLibraryMode?: 'all' | 'favorites' | 'recent' };
 const FAVORITES_KEY = 'momsat:favorites:v1';
 const RECENT_KEY = 'momsat:recent:v1';
+const PERSISTENT_PLAYER_KEY = 'momsat.persistent-player.v1';
 
 function readIds(key: string) {
   if (typeof window === 'undefined') return [] as number[];
   try { const value = JSON.parse(window.localStorage.getItem(key) || '[]'); return Array.isArray(value) ? value.map(Number).filter(Number.isFinite) : []; } catch { return []; }
 }
 function writeIds(key: string, ids: number[]) { try { window.localStorage.setItem(key, JSON.stringify(ids)); } catch { /* ignore */ } }
-function findFeatured(channels: Channel[]) {
-  for (const preferred of featuredSpotlightOrder) {
-    const wanted = preferred.toLocaleLowerCase();
-    const match = channels.find((channel) => channel.name.toLocaleLowerCase() === wanted || channel.nameEn.toLocaleLowerCase() === wanted);
-    if (match) return match;
-  }
-  return [...channels].sort((a, b) => b.popular - a.popular || b.sources.length - a.sources.length)[0] ?? null;
+function readLastWatchedId() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const active = JSON.parse(window.sessionStorage.getItem(PERSISTENT_PLAYER_KEY) || 'null') as { id?: number } | null;
+    if (active?.id != null && Number.isFinite(Number(active.id))) return Number(active.id);
+  } catch { /* ignore */ }
+  const recent = readIds(RECENT_KEY);
+  return recent[0] ?? null;
 }
 function matchesCategory(channel: Channel, category: string) {
   if (category === 'all') return true;
@@ -56,10 +57,11 @@ export default function YouTubeBrowseShell({ channels, initialQuery = '', initia
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [favorites, setFavorites] = useState<number[]>([]);
   const [recent, setRecent] = useState<number[]>([]);
-  const hero = useMemo(() => findFeatured(channels), [channels]);
+  const [lastWatchedId, setLastWatchedId] = useState<number | null>(null);
 
   useEffect(() => {
     setFavorites(readIds(FAVORITES_KEY)); setRecent(readIds(RECENT_KEY));
+    setLastWatchedId(readLastWatchedId());
     const onKeyDown = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); document.querySelector<HTMLInputElement>('input[aria-label="جستجوی شبکه"]')?.focus(); } };
     window.addEventListener('keydown', onKeyDown); return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
@@ -73,10 +75,14 @@ export default function YouTubeBrowseShell({ channels, initialQuery = '', initia
     });
   }, [channels, query, category, libraryMode, favorites, recent]);
 
+  const resumeChannel = useMemo(() => {
+    if (lastWatchedId == null) return null;
+    return channels.find((channel) => channel.id === lastWatchedId) ?? null;
+  }, [channels, lastWatchedId]);
   const popular = useMemo(() => [...filtered].sort((a, b) => b.popular - a.popular || b.sources.length - a.sources.length).slice(0, 10), [filtered]);
   const recentChannels = useMemo(() => recent.map((id) => channels.find((channel) => channel.id === id)).filter((channel): channel is Channel => Boolean(channel)).filter((channel) => !query || `${channel.name} ${channel.nameEn}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [channels, recent, query]);
   const selectedCategories = [['all', 'همه'], ['persian', 'فارسی'], ['news', 'اخبار'], ['sport', 'ورزش'], ['music', 'موسیقی'], ['movie', 'فیلم و سریال'], ['radio', 'رادیو']];
-  const markRecent = (id: number) => setRecent((current) => { const next = [id, ...current.filter((value) => value !== id)].slice(0, 30); writeIds(RECENT_KEY, next); return next; });
+  const markRecent = (id: number) => { setLastWatchedId(id); setRecent((current) => { const next = [id, ...current.filter((value) => value !== id)].slice(0, 30); writeIds(RECENT_KEY, next); return next; }); };
   const toggleFavorite = (id: number) => setFavorites((current) => { const next = current.includes(id) ? current.filter((value) => value !== id) : [id, ...current].slice(0, 100); writeIds(FAVORITES_KEY, next); return next; });
   const renderRail = (title: string, subtitle: string, items: Channel[]) => !items.length ? null : <section className={styles.section}>
     <div className={styles.sectionHeading}><div><h2>{title}</h2><p>{subtitle}</p></div><button className={styles.seeAllButton} type="button" onClick={() => { setLibraryMode('all'); setCategory('all'); setQuery(''); }}>مشاهده همه</button></div>
@@ -89,7 +95,7 @@ export default function YouTubeBrowseShell({ channels, initialQuery = '', initia
       <div className={styles.searchWrap}><Search size={19} /><input value={query} onChange={(event) => { setQuery(event.target.value); setLibraryMode('all'); }} placeholder="جستجوی شبکه، ورزش، اخبار، موسیقی..." aria-label="جستجوی شبکه" /><kbd>⌘ K</kbd></div>
       <div className={styles.headerActions}><button className={styles.iconButton} aria-label="اعلان‌ها"><Bell size={20} /></button><Link href="/settings" className={styles.avatarLink} aria-label="تنظیمات"><UserCircle size={29} /></Link></div>
     </header>
-    <div className={`${styles.body}${sidebarOpen ? '' : ` ${styles.compact}`}`}>
+    <div className={`${styles.body}${sidebarOpen ? '' : ` ${styles.compact}`}>
       <aside className={styles.sidebar}><nav>
         <button className={`${styles.navItem}${libraryMode === 'all' && category === 'all' ? ` ${styles.navItemActive}` : ''}`} onClick={() => { setLibraryMode('all'); setCategory('all'); setQuery(''); }}><Home size={19} /><span>خانه</span></button>
         <Link className={styles.navItem} href="/browse?category=all"><Compass size={19} /><span>کشف شبکه‌ها</span></Link>
@@ -100,7 +106,7 @@ export default function YouTubeBrowseShell({ channels, initialQuery = '', initia
         <div className={styles.navDivider} /><div className={styles.navLabel}>سایر</div><Link className={styles.navItem} href="/settings"><Settings size={19} /><span>تنظیمات</span></Link><Link className={styles.navItem} href="/admin"><Tv size={19} /><span>مدیریت MOMSAT</span></Link>
       </nav></aside>
       <main className={styles.content}>
-        {hero && libraryMode === 'all' && !query && category === 'all' ? <section className={styles.hero}><div className={styles.heroImage} style={hero.image ? { backgroundImage: `url("${hero.image.replace(/"/g, '%22')}")` } : undefined} /><div className={styles.heroShade} /><div className={styles.heroContent}><div className={styles.heroEyebrow}><i /> پخش زنده منتخب MOMSAT</div><h1>{hero.name}</h1><p>{hero.nameEn || 'Persian Live Television'} · {hero.category || 'Live TV'} · {hero.sources.length} منبع پخش</p><div className={styles.heroActions}><Link href={`/channel/${hero.id}`} onClick={() => markRecent(hero.id)} className={styles.watchButton}><Play size={17} fill="currentColor" /> تماشا</Link><Link href={`/channel/${hero.id}`} className={styles.infoButton}>جزئیات شبکه</Link></div></div></section> : null}
+        {resumeChannel && libraryMode === 'all' && !query && category === 'all' ? <section className={styles.hero}><div className={styles.heroImage} style={resumeChannel.image ? { backgroundImage: `url("${resumeChannel.image.replace(/"/g, '%22')}")` } : undefined} /><div className={styles.heroShade} /><div className={styles.heroContent}><div className={styles.heroEyebrow}><i /> ادامه تماشا</div><h1>{resumeChannel.name}</h1><p>{resumeChannel.nameEn || 'Persian Live Television'} · {resumeChannel.category || 'Live TV'} · {resumeChannel.sources.length} منبع پخش</p><div className={styles.heroActions}><Link href={`/channel/${resumeChannel.id}`} onClick={() => markRecent(resumeChannel.id)} className={styles.watchButton}><Play size={17} fill="currentColor" /> ادامه تماشا</Link><Link href={`/channel/${resumeChannel.id}`} className={styles.infoButton}>جزئیات شبکه</Link></div></div></section> : null}
         <div className={styles.categoryBar}>{selectedCategories.map(([id, label]) => <button key={id} className={`${styles.categoryChip}${category === id ? ` ${styles.categoryActive}` : ''}`} onClick={() => { setCategory(id); setLibraryMode('all'); }}>{label}</button>)}</div>
         {libraryMode === 'all' && !query && category === 'all' ? renderRail('ادامه تماشا', 'شبکه‌هایی که اخیراً باز کرده‌ای', recentChannels) : null}
         {renderRail(libraryMode === 'favorites' ? 'علاقه‌مندی‌های من' : libraryMode === 'recent' ? 'اخیراً تماشا شده' : 'شبکه‌های محبوب', libraryMode === 'favorites' ? 'شبکه‌های ذخیره‌شده روی همین دستگاه' : libraryMode === 'recent' ? 'آخرین شبکه‌هایی که مشاهده کرده‌ای' : 'محبوب‌ترین گزینه‌ها در کاتالوگ فعلی', popular)}
