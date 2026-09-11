@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { BarChart3, Check, Maximize2, MonitorPlay, PictureInPicture2, RefreshCw, Settings2, Volume2, VolumeX, X } from 'lucide-react';
 import PlayerPro from './PlayerPro';
 import styles from './PlayerProEnhanced.module.css';
-import { loadAppSettings, type AppSettings } from '../lib/app-settings';
+import { loadAppSettings, subscribeAppSettings, type AppSettings } from '../lib/app-settings';
 
 type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
 type Channel = { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
@@ -29,23 +29,30 @@ export default function PlayerProEnhanced({ channel }: { channel: Channel }) {
   const [stats, setStats] = useState({ resolution: '—', readyState: 0, buffered: 0, currentTime: 0 });
 
   useEffect(() => {
-    const loaded = loadPreferences();
-    setPreferences(loaded);
+    const loaded = loadAppSettings();
+    setAppSettings(loaded);
+    setPreferences((current) => ({
+      ...current,
+      autoplay: loaded.autoplay,
+      mutedStart: loaded.mutedStart,
+      theater: loaded.theaterMode,
+      showStats: loaded.showTechnicalStats,
+      playbackRate: loaded.playbackRate,
+    }));
     setMuted(loaded.mutedStart);
-    setAppSettings(loadAppSettings());
-  }, []);
-
-  useEffect(() => {
-    const onSettings = (event: Event) => {
-      const custom = event as CustomEvent<AppSettings>;
-      const next = custom.detail || loadAppSettings();
+    return subscribeAppSettings((next) => {
       setAppSettings(next);
-      setPreferences((current) => ({ ...current, autoplay: next.autoplay, mutedStart: next.mutedStart, theater: next.theaterMode, showStats: next.showTechnicalStats, playbackRate: next.playbackRate }));
+      setPreferences((current) => ({
+        ...current,
+        autoplay: next.autoplay,
+        mutedStart: next.mutedStart,
+        theater: next.theaterMode,
+        showStats: next.showTechnicalStats,
+        playbackRate: next.playbackRate,
+      }));
       setMuted(next.mutedStart);
       qualityApplyStarted.current = false;
-    };
-    window.addEventListener('momsat-settings-changed', onSettings);
-    return () => window.removeEventListener('momsat-settings-changed', onSettings);
+    });
   }, []);
 
   const update = useCallback((patch: Partial<Preferences>) => {
