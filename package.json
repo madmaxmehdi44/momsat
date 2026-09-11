@@ -6,7 +6,7 @@
     "dev": "node scripts/harden-live-player.mjs && next dev --turbopack",
     "build": "node scripts/harden-live-player.mjs && prisma generate && next build",
     "start": "node scripts/harden-live-player.mjs && next start",
-    "lint": "node scripts/harden-live-player.mjs && tsc --noEmit",
+    "lint": "node scripts/harden-live-player.mjs && prisma generate && tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:verify": "tsx scripts/verify-prisma.ts",
