@@ -2,14 +2,12 @@ export const dynamic = 'force-dynamic';
 
 import { notFound } from 'next/navigation';
 import { getCatalog } from '../../../lib/catalog-db';
-import YouTubeWatchPage from '../../../components/YouTubeWatchPage';
+import ChannelProfilePage from '../../../components/ChannelProfilePage';
 
 export default async function ChannelPage({ params }: { params: Promise<{ id: string }> }) {
   const id = Number((await params).id);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  // Load the catalog once and derive both the requested channel and its
-  // recommendations from the same snapshot.
   const catalog = await getCatalog();
   const channel = catalog.find((item) => item.id === id) ?? null;
   if (!channel) notFound();
@@ -23,5 +21,5 @@ export default async function ChannelPage({ params }: { params: Promise<{ id: st
     })
     .slice(0, 12);
 
-  return <YouTubeWatchPage channel={channel} recommendations={recommendations} />;
+  return <ChannelProfilePage channel={channel} recommendations={recommendations} />;
 }
