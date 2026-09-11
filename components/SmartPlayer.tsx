@@ -42,10 +42,8 @@ async function probeSource(source: Source) {
   if (source.referer) params.set('referer', source.referer);
   if (source.origin) params.set('origin', source.origin);
   const url = `/api/stream/probe?${params.toString()}`;
-
   const cached = await clientCacheGet<ProbeResult>(url, 15_000);
   if (cached && (cached.playable || cached.ok)) return cached;
-
   try {
     const response = await fetch(url, { cache: 'no-store' });
     if (!response.ok) return null;
