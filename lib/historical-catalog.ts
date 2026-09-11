@@ -7,7 +7,7 @@ export type HistoricalChannel = {
   name: string;
   nameEn: string;
   image: string | null;
-  status: HistoricalStatus;
+  status: HistoricalStatus | null;
   note: string | null;
   since: string | null;
   channelId: number | null;
@@ -33,12 +33,12 @@ export async function getHistoricalChannels(status?: HistoricalStatus): Promise<
       select,
       orderBy: [{ archiveSince: 'desc' }, { name: 'asc' }],
     });
-    return rows.filter((row) => row.archiveStatus).map((row) => ({
+    return rows.map((row) => ({
       id: row.id,
       name: row.name,
       nameEn: row.nameEn,
       image: row.image,
-      status: row.archiveStatus as HistoricalStatus,
+      status: row.archiveStatus as HistoricalStatus | null,
       note: row.archiveNote,
       since: row.archiveSince?.toISOString() ?? null,
       channelId: row.id,
