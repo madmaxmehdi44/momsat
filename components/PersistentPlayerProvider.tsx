@@ -8,7 +8,6 @@ import styles from './PersistentPlayerProvider.module.css';
 
 type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
 export type PersistentChannel = { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
-
 type PlayerHostRect = { top: number; left: number; width: number; height: number };
 
 type PersistentPlayerContextValue = {
@@ -60,7 +59,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const [playerHost, setPlayerHost] = useState<HTMLElement | null>(null);
   const [hostRect, setHostRect] = useState<PlayerHostRect | null>(null);
 
-  const expanded = isCurrentChannelPage(pathname, activeChannel) && Boolean(playerHost);
+  const expanded = isCurrentChannelPage(pathname, activeChannel);
 
   useEffect(() => {
     try {
@@ -138,7 +137,8 @@ export default function PersistentPlayerProvider({ children }: { children: React
   }), [activeChannel, expanded, setActiveChannel, stopPlayer, registerPlayerHost]);
 
   const portalTarget = typeof document !== 'undefined' ? document.body : null;
-  const player = activeChannel && !collapsed && portalTarget ? createPortal(
+  const canRenderPlayer = Boolean(activeChannel && !collapsed && portalTarget && (!expanded || hostRect));
+  const player = canRenderPlayer ? createPortal(
     <aside
       className={`${styles.root} ${expanded ? styles.expanded : styles.mini}`}
       style={expanded && hostRect ? {
@@ -150,13 +150,13 @@ export default function PersistentPlayerProvider({ children }: { children: React
       aria-label="MOMSAT player"
     >
       <div className={styles.inner}>
-        <StreamAccelerator urls={(activeChannel.sources ?? []).map((source) => source.url)} />
-        <PlayerProEnhanced channel={activeChannel} />
+        <StreamAccelerator urls={(activeChannel?.sources ?? []).map((source) => source.url)} />
+        <PlayerProEnhanced channel={activeChannel!} />
         <button className={styles.close} type="button" onClick={stopPlayer} aria-label="بستن پلیر شناور">×</button>
-        {!expanded && <div className={styles.nowPlaying} dir="rtl"><strong>{activeChannel.name || 'MOMSAT'}</strong><span>در حال پخش</span></div>}
+        {!expanded && <div className={styles.nowPlaying} dir="rtl"><strong>{activeChannel?.name || 'MOMSAT'}</strong><span>در حال پخش</span></div>}
       </div>
     </aside>,
-    portalTarget,
+    portalTarget!,
   ) : null;
 
   return (
