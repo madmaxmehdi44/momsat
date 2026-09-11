@@ -38,21 +38,23 @@ async function resolvePages(sources: Source[]) {
 }
 
 async function probeSource(source: Source) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5500);
+  const params = new URLSearchParams({ url: source.url });
+  if (source.referer) params.set('referer', source.referer);
+  if (source.origin) params.set('origin', source.origin);
+  const url = `/api/stream/probe?${params.toString()}`;
+
+  const cached = await clientCacheGet<ProbeResult>(url, 15_000);
+  if (cached && (cached.playable || cached.ok)) return cached;
+
   try {
-    const params = new URLSearchParams({ url: source.url });
-    if (source.referer) params.set('referer', source.referer);
-    if (source.origin) params.set('origin', source.origin);
-    const url = `/api/stream/probe?${params.toString()}`;
-    const cached = await clientCacheGet<ProbeResult>(url, 15_000);
-    if (cached && (cached.playable || cached.ok)) return cached;
-    const response = await fetch(url, { cache: 'no-store', signal: controller.signal });
+    const response = await fetch(url, { cache: 'no-store' });
     if (!response.ok) return null;
     const result = await response.json() as ProbeResult;
     if (result.playable || result.ok) void clientCacheSet(url, result);
     return result.playable || result.ok ? result : null;
-  } catch { return null; } finally { clearTimeout(timer); }
+  } catch {
+    return null;
+  }
 }
 
 async function verifySources(sources: Source[]) {
