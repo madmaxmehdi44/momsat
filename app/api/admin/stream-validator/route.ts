@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   try {
     const channels = await activeChannels();
     const urls = new Set<string>();
-    for (const channel of channels) { urls.add(channel.url); channel.sources.forEach((source) => urls.add(source.url)); }
+    for (const channel of channels) { if (channel.url) urls.add(channel.url); channel.sources.forEach((source) => urls.add(source.url)); }
     return NextResponse.json({ ok: true, count: channels.length, urls: urls.size, channels });
   } catch (error) { return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Could not load streams' }, { status: 500 }); }
 }
@@ -34,7 +34,62 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   try {
-    const body = await req.json().catch(() => ({})) as { channelIds?: unknown; urls?: unknown };
+    const body = await req.json().catch(() => ({})) as {
+      action?: unknown;
+      channelIds?: unknown;
+      urls?: unknown;
+      healthy?: unknown;
+    };
+
+    if (body.action === 'finalize') {
+      const healthy = Array.isArray(body.healthy) ? body.healthy : [];
+      const normalized: Array<{ channelId: number; channelName: string; url: string; score: number; reason?: string }> = healthy
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null;
+          const value = item as Record<string, unknown>;
+          const channelId = Number(value.channelId);
+          const url = typeof value.url === 'string' ? value.url.trim() : '';
+          const verdict = value.verdict;
+          if (!Number.isInteger(channelId) || channelId <= 0 || !url || verdict !== 'HEALTHY') return null;
+          return {
+            channelId,
+            channelName: typeof value.channelName === 'string' ? value.channelName : `Channel ${channelId}`,
+            url,
+            score: Number.isFinite(Number(value.score)) ? Number(value.score) : 0,
+            reason: typeof value.reason === 'string' ? value.reason : undefined,
+          };
+        })
+        .filter((value): value is { channelId: number; channelName: string; url: string; score: number; reason?: string } => Boolean(value));
+
+      const deduped = Array.from(new Map(normalized.map((item) => [`${item.channelId}|${item.url}`, item])).values());
+      let saved = 0;
+      for (const item of deduped) {
+        await updateStreamHealth({
+          channelId: item.channelId,
+          url: item.url,
+          status: 'HEALTHY',
+          reason: item.reason || 'خودکار ذخیره شد پس از صحت‌سنجی کامل استریم',
+        });
+        saved += 1;
+      }
+
+      const bestByChannel = new Map<number, (typeof deduped)[number]>();
+      for (const item of deduped) {
+        const current = bestByChannel.get(item.channelId);
+        if (!current || item.score > current.score) bestByChannel.set(item.channelId, item);
+      }
+
+      for (const item of bestByChannel.values()) {
+        await prisma.channel.update({
+          where: { id: item.channelId },
+          data: { url: item.url, archiveStatus: null, archiveNote: null, archiveSince: null },
+        });
+      }
+
+      ttlDelete('momsat:catalog:v5:database-first-health-ranked');
+      return NextResponse.json({ ok: true, saved, activatedChannels: bestByChannel.size, playlistReady: true });
+    }
+
     const channelIds = Array.isArray(body.channelIds) ? body.channelIds.map(Number).filter((id) => Number.isInteger(id) && id > 0) : undefined;
     const requestedUrls = new Set(
       Array.isArray(body.urls)
@@ -47,9 +102,12 @@ export async function POST(req: NextRequest) {
     const jobs: Array<{ channelId: number; channelName: string; url: string; referer: string | null; origin: string | null }> = [];
     for (const channel of channels) {
       const sources = channel.sources.length ? channel.sources : [{ id: null, title: null, url: channel.url, referer: channel.referer, origin: channel.origin, vip: false }];
-      for (const source of sources) if (!requestedUrls.size || requestedUrls.has(source.url.trim())) jobs.push({ channelId: channel.id, channelName: channel.name, url: source.url.trim(), referer: source.referer ?? channel.referer, origin: source.origin ?? channel.origin });
+      for (const source of sources) if (source.url) {
+        const url = source.url.trim();
+        if (url && (!requestedUrls.size || requestedUrls.has(url))) jobs.push({ channelId: channel.id, channelName: channel.name, url, referer: source.referer ?? channel.referer, origin: source.origin ?? channel.origin });
+      }
     }
-    const results: Array<StreamProbeResult & { channelId: number; channelName: string }> = [];
+    const results: Array<StreamProbeResult & { channelId: number; channelName: string; referer: string | null; origin: string | null }> = [];
     const concurrency = Math.min(4, Math.max(1, Number(process.env.STREAM_PROBE_CONCURRENCY) || 4));
     let cursor = 0;
     async function worker() {
@@ -58,7 +116,7 @@ export async function POST(req: NextRequest) {
         if (index >= jobs.length) return;
         const job = jobs[index];
         const result = await probeStream(job.url, { referer: job.referer, origin: job.origin });
-        results.push({ ...result, channelId: job.channelId, channelName: job.channelName });
+        results.push({ ...result, channelId: job.channelId, channelName: job.channelName, referer: job.referer, origin: job.origin });
       }
     }
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
