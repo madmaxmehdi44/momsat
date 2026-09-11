@@ -22,6 +22,9 @@ type DbChannel = Awaited<ReturnType<typeof prisma.channel.findMany>>[number] & {
   sources: Array<{ id: number; title: string | null; url: string; referer: string | null; origin: string | null; country: string | null; vip: boolean }>;
 };
 
+const DB_CATALOG_TIMEOUT_MS = 1800;
+const STREAM_HEALTH_TIMEOUT_MS = 700;
+
 function toCatalog(channel: DbChannel): Channel {
   const primary = channel.url
     ? [{ id: null, title: 'Primary', url: channel.url, referer: channel.referer, origin: channel.origin, country: channel.country ?? null, vip: channel.vip }]
@@ -54,10 +57,23 @@ function toCatalog(channel: DbChannel): Channel {
   };
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(fallback), timeoutMs);
+    promise.then((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    }).catch((error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
 async function normalizeCatalog(channels: Channel[]) {
   const merged = mergeFeaturedChannels(channels);
   const ranked = rankCatalogChannels(merged);
-  const healthApplied = await applyStreamHealth(ranked);
+  const healthApplied = await withTimeout(applyStreamHealth(ranked), STREAM_HEALTH_TIMEOUT_MS, ranked);
   return healthApplied.map((channel) => ({
     ...channel,
     image: channel.image || fallbackChannelThumbnail(channel.nameEn || channel.name, channel.category),
@@ -68,7 +84,7 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
   if (!process.env.DATABASE_URL?.trim()) return null;
   try {
     const timeout = new Promise<null>((resolve) => {
-      setTimeout(() => resolve(null), 4500);
+      setTimeout(() => resolve(null), DB_CATALOG_TIMEOUT_MS);
     });
     const databaseLoad = prisma.channel.findMany({
       where: { archiveStatus: null },
@@ -78,7 +94,7 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
 
     const result = await Promise.race([databaseLoad, timeout]);
     if (result === null) {
-      console.warn('[catalog-db] Database catalog timed out; falling back to configured catalog sources.');
+      console.warn(`[catalog-db] Database catalog timed out after ${DB_CATALOG_TIMEOUT_MS}ms; falling back to configured catalog sources.`);
       return null;
     }
     return result;
