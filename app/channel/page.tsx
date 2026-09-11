@@ -1,7 +1,18 @@
-import { redirect } from 'next/navigation';
+export const dynamic = 'force-dynamic';
 
-export default function ChannelIndexPage() {
-  // /channel is the collection entry point. Individual channels live at
-  // /channel/[id], while the canonical discovery surface is /browse.
-  redirect('/browse');
+import { getCatalog } from '../../lib/catalog-db';
+import YouTubeBrowseShellV2 from '../../components/YouTubeBrowseShellV2';
+
+export default async function ChannelIndexPage({ searchParams }: { searchParams: Promise<{ q?: string; category?: string; favorites?: string; recent?: string }> }) {
+  const sp = await searchParams;
+  const channels = await getCatalog();
+
+  return (
+    <YouTubeBrowseShellV2
+      channels={channels}
+      initialQuery={sp.q || ''}
+      initialCategory={sp.category || 'all'}
+      initialLibraryMode={sp.favorites === '1' ? 'favorites' : sp.recent === '1' ? 'recent' : 'all'}
+    />
+  );
 }
