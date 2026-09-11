@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import styles from './stream-validator.module.css';
 
@@ -14,6 +14,7 @@ type Probe = {
 
 type Channel = { id: number; name: string; nameEn: string; image: string | null; url: string; sources: { url: string }[] };
 const TOKEN_KEY = 'momsat.admin.token';
+const PAGE_SIZE = 25;
 
 const verdictText = { HEALTHY: 'سالم و زنده', SUSPECT: 'نیازمند بررسی', BROKEN: 'خراب' } as const;
 const verdictClass = (value: Probe['verdict']) => value === 'HEALTHY' ? styles.healthy : value === 'SUSPECT' ? styles.suspect : styles.broken;
@@ -24,13 +25,13 @@ export default function StreamValidatorPage() {
   const [results, setResults] = useState<Probe[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState({ completed: 0, total: 0 });
   const [activating, setActivating] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | Probe['verdict']>('all');
+  const cancelRef = useRef(false);
 
-  useEffect(() => {
-    try { setToken(localStorage.getItem(TOKEN_KEY) || ''); } catch {}
-  }, []);
+  useEffect(() => { try { setToken(localStorage.getItem(TOKEN_KEY) || ''); } catch {} }, []);
 
   const headers = (): Record<string, string> => token.trim() ? { 'x-admin-token': token.trim() } : {};
 
@@ -40,25 +41,42 @@ export default function StreamValidatorPage() {
       const response = await fetch('/api/admin/stream-validator', { cache: 'no-store', headers: headers() });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'دریافت استریم‌ها ناموفق بود');
-      setChannels(body.channels || []);
+      setChannels(Array.isArray(body.channels) ? body.channels : []);
     } catch (err) { setError(err instanceof Error ? err.message : 'خطای نامشخص'); }
     finally { setLoading(false); }
   }
 
   useEffect(() => { void load(); }, []);
 
+  async function validateBatch(batch: Channel[]) {
+    const ids = batch.map((channel) => channel.id);
+    const response = await fetch('/api/admin/stream-validator', {
+      method: 'POST', headers: { ...headers(), 'content-type': 'application/json' },
+      body: JSON.stringify({ channelIds: ids }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || 'صحت‌سنجی ناموفق بود');
+    return Array.isArray(body.results) ? body.results as Probe[] : [];
+  }
+
   async function validateAll() {
-    setRunning(true); setError(''); setResults([]);
+    if (running) return;
+    cancelRef.current = false;
+    setRunning(true); setError(''); setResults([]); setProgress({ completed: 0, total: channels.length });
     try {
-      const response = await fetch('/api/admin/stream-validator', {
-        method: 'POST', headers: { ...headers(), 'content-type': 'application/json' }, body: JSON.stringify({}),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || 'صحت‌سنجی ناموفق بود');
-      setResults(body.results || []);
+      const allResults: Probe[] = [];
+      for (let offset = 0; offset < channels.length; offset += PAGE_SIZE) {
+        if (cancelRef.current) break;
+        const batchResults = await validateBatch(channels.slice(offset, offset + PAGE_SIZE));
+        allResults.push(...batchResults);
+        setResults([...allResults]);
+        setProgress({ completed: Math.min(offset + PAGE_SIZE, channels.length), total: channels.length });
+      }
     } catch (err) { setError(err instanceof Error ? err.message : 'صحت‌سنجی ناموفق بود'); }
     finally { setRunning(false); }
   }
+
+  function cancelValidation() { cancelRef.current = true; }
 
   async function activate(result: Probe) {
     setActivating(`${result.channelId}:${result.url}`); setError('');
@@ -82,6 +100,7 @@ export default function StreamValidatorPage() {
     broken: results.filter((r) => r.verdict === 'BROKEN').length,
   }), [results]);
   const visible = filter === 'all' ? results : results.filter((r) => r.verdict === filter);
+  const runningLabel = progress.total > 0 ? `در حال بررسی ${progress.completed.toLocaleString('fa-IR')} از ${progress.total.toLocaleString('fa-IR')}` : 'در حال شروع…';
 
   return <main dir="rtl" className={styles.page}>
     <div className={styles.inner}>
@@ -96,9 +115,11 @@ export default function StreamValidatorPage() {
 
       <section className={styles.toolbar}>
         <input className={styles.token} value={token} onChange={(e) => { setToken(e.target.value); try { localStorage.setItem(TOKEN_KEY, e.target.value); } catch {} }} placeholder="ADMIN_TOKEN در صورت نیاز" type="password" />
-        <button className={styles.primary} disabled={running || loading} onClick={() => void validateAll()}>{running ? 'در حال صحت‌سنجی…' : 'شروع صحت‌سنجی همه استریم‌ها'}</button>
+        {!running ? <button className={styles.primary} disabled={loading || !channels.length} onClick={() => void validateAll()}>شروع صحت‌سنجی همه استریم‌ها</button> : <button className={styles.secondary} onClick={cancelValidation}>توقف پس از batch جاری</button>}
         <button className={styles.secondary} disabled={loading || running} onClick={() => void load()}>بازخوانی لیست</button>
       </section>
+
+      {running && <div className={styles.progress}><div className={styles.progressTop}><span>{runningLabel}</span><strong>{progress.total ? Math.round((progress.completed / progress.total) * 100) : 0}%</strong></div><div className={styles.progressTrack}><div className={styles.progressBar} style={{ width: `${progress.total ? Math.max(2, Math.round((progress.completed / progress.total) * 100)) : 2}%` }} /></div><p>نتایج هر batch بلافاصله نمایش داده می‌شوند؛ لازم نیست تا پایان ۵۰۹ استریم صبر کنی.</p></div>}
 
       <section className={styles.stats}>
         <button className={`${styles.stat} ${filter === 'all' ? styles.selected : ''}`} onClick={() => setFilter('all')}><span>نتایج تست</span><strong>{counts.total}</strong></button>
@@ -110,7 +131,7 @@ export default function StreamValidatorPage() {
 
       {error && <div className={styles.error}>{error}</div>}
       {loading && <div className={styles.empty}>در حال دریافت لیست استریم‌های فعال…</div>}
-      {!loading && !results.length && <div className={styles.empty}>برای شروع، «شروع صحت‌سنجی همه استریم‌ها» را بزن. هیچ تغییری در دیتابیس تا زمان تأیید شما انجام نمی‌شود.</div>}
+      {!loading && !results.length && <div className={styles.empty}>{running ? 'در حال دریافت اولین نتایج…' : 'برای شروع، «شروع صحت‌سنجی همه استریم‌ها» را بزن. نتایج به‌صورت تدریجی نمایش داده می‌شوند و هیچ تغییری در دیتابیس تا زمان تأیید شما انجام نمی‌شود.'}</div>}
 
       {visible.length > 0 && <div className={styles.list}>
         {visible.map((result) => {
