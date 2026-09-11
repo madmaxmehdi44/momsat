@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
 
     if (body.action === 'finalize') {
       const healthy = Array.isArray(body.healthy) ? body.healthy : [];
-      const normalized: Array<{ channelId: number; channelName: string; url: string; score: number; reason?: string }> = healthy
+      const normalized = healthy
         .map((item) => {
           if (!item || typeof item !== 'object') return null;
           const value = item as Record<string, unknown>;
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
             reason: typeof value.reason === 'string' ? value.reason : undefined,
           };
         })
-        .filter((value): value is { channelId: number; channelName: string; url: string; score: number; reason?: string } => Boolean(value));
+        .filter((value): value is NonNullable<typeof value> => value !== null);
 
       const deduped = Array.from(new Map(normalized.map((item) => [`${item.channelId}|${item.url}`, item])).values());
       let saved = 0;
