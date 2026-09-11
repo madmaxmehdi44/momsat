@@ -114,7 +114,10 @@ export function installGlobalActionPipeline() {
     const method = xhr.__momsatMethod || 'GET';
     const url = xhr.__momsatUrl || '';
     const label = requestLabel(url, method);
-    if (!label) return originalSend.apply(this, args as any);
+    if (!label) {
+      const send = originalSend as (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) => void;
+      return send.call(this, args[0] as Document | XMLHttpRequestBodyInit | null);
+    }
 
     const id = `xhr:${method}:${url}`;
     xhr.__momsatActionId = id;
@@ -123,7 +126,8 @@ export function installGlobalActionPipeline() {
       if (xhr.status >= 200 && xhr.status < 400) finishAction(id);
       else failAction(id, `درخواست با وضعیت ${xhr.status || 'نامشخص'} پایان یافت`);
     }, { once: true });
-    return originalSend.apply(this, args as any);
+    const send = originalSend as (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) => void;
+    return send.call(this, args[0] as Document | XMLHttpRequestBodyInit | null);
   };
 
   return () => {
