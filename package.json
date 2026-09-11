@@ -3,15 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "prisma generate && next build",
-    "start": "next start",
-    "lint": "tsc --noEmit",
+    "dev": "node scripts/harden-live-player.mjs && next dev --turbopack",
+    "build": "node scripts/harden-live-player.mjs && prisma generate && next build",
+    "start": "node scripts/harden-live-player.mjs && next start",
+    "lint": "node scripts/harden-live-player.mjs && tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:verify": "tsx scripts/verify-prisma.ts",
     "seed": "tsx prisma/seed.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate && node scripts/harden-live-player.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.15.0",
