@@ -1,12 +1,12 @@
 export const dynamic = 'force-dynamic';
 
 import { getCatalog } from '../../lib/catalog-db';
-import YouTubeBrowseShell from '../../components/YouTubeBrowseShell';
+import YouTubeBrowseShellV2 from '../../components/YouTubeBrowseShellV2';
 
 export default async function Browse({ searchParams }: { searchParams: Promise<{ q?: string; category?: string; favorites?: string; recent?: string }> }) {
   const sp = await searchParams;
   const channels = await getCatalog();
-  return <YouTubeBrowseShell
+  return <YouTubeBrowseShellV2
     channels={channels}
     initialQuery={sp.q || ''}
     initialCategory={sp.category || 'all'}
