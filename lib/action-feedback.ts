@@ -104,9 +104,27 @@ export function installGlobalActionPipeline() {
   target.__momsatOriginalSend = originalSend;
 
   XMLHttpRequest.prototype.open = function(method: string, url: string | URL, ...rest: any[]) {
-    (this as XMLHttpRequest & { __momsatMethod?: string; __momsatUrl?: string }).__momsatMethod = method.toUpperCase();
-    (this as XMLHttpRequest & { __momsatMethod?: string; __momsatUrl?: string }).__momsatUrl = String(url);
-    return originalOpen.call(this, method, url, ...rest);
+    const xhr = this as XMLHttpRequest & { __momsatMethod?: string; __momsatUrl?: string };
+    xhr.__momsatMethod = method.toUpperCase();
+    xhr.__momsatUrl = String(url);
+
+    const open = originalOpen as unknown as (
+      this: XMLHttpRequest,
+      method: string,
+      url: string | URL,
+      async?: boolean,
+      username?: string | null,
+      password?: string | null,
+    ) => void;
+
+    const async = rest.length > 0 ? Boolean(rest[0]) : undefined;
+    const username = rest.length > 1 ? (rest[1] as string | null | undefined) : undefined;
+    const password = rest.length > 2 ? (rest[2] as string | null | undefined) : undefined;
+
+    if (rest.length >= 3) return open.call(this, method, url, async, username, password);
+    if (rest.length === 2) return open.call(this, method, url, async, username);
+    if (rest.length === 1) return open.call(this, method, url, async);
+    return open.call(this, method, url);
   };
 
   XMLHttpRequest.prototype.send = function(...args: any[]) {
