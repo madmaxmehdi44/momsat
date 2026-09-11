@@ -1,6 +1,7 @@
 import './globals.css';
 import BrowserCompatibility from '../components/BrowserCompatibility';
 import InteractionFeedback from '../components/InteractionFeedback';
+import MomsatAppChrome from '../components/MomsatAppChrome';
 import PersistentPlayerProvider from '../components/PersistentPlayerProvider';
 
 export const metadata = {
@@ -14,7 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <BrowserCompatibility />
         <PersistentPlayerProvider>
-          {children}
+          <MomsatAppChrome>{children}</MomsatAppChrome>
         </PersistentPlayerProvider>
         <InteractionFeedback />
       </body>
