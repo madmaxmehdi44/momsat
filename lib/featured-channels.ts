@@ -37,6 +37,20 @@ function source(key: string, title: string, url: string, country = 'AE', origin:
   };
 }
 
+export const featuredSpotlightOrder = [
+  'Fun Plus',
+  'Iran International',
+  'GEM Series',
+  'MBC Persia',
+  'VOA Persian',
+  'BBC Persian',
+  'PMC',
+  'Manoto',
+  'Tapesh',
+  'Caltex Music',
+  'Radio Farda',
+] as const;
+
 const definitions: FeaturedDefinition[] = [
   {
     id: 'iran-international', name: 'Iran International', nameEn: 'Iran International', category: 'News', categoryEn: 'news', country: 'UK', platform: 'SATELLITE + INTERNET',
@@ -94,6 +108,26 @@ const definitions: FeaturedDefinition[] = [
       source('gem-tv:legacy-cloudfront', 'Legacy HLS', 'https://d2e40kvaojifd6.cloudfront.net/stream/gem_tv/playlist_1920x1080_4500k.m3u8', 'TR'),
     ],
   },
+  {
+    id: 'manoto', name: 'Manoto', nameEn: 'Manoto', category: 'Entertainment', categoryEn: 'entertainment', country: 'UK', platform: 'SATELLITE + INTERNET',
+    satellite: null, frequency: null, polarization: null, symbolRate: null,
+    sources: [source('manoto:cloudfront', 'Direct HLS', 'https://d2rwmwucnr0d10.cloudfront.net/live.m3u8', 'UK')],
+  },
+  {
+    id: 'tapesh', name: 'Tapesh', nameEn: 'Tapesh', category: 'Music', categoryEn: 'music', country: 'US', platform: 'SATELLITE + INTERNET',
+    satellite: null, frequency: null, polarization: null, symbolRate: null,
+    sources: [source('tapesh:hls', 'Direct HLS', 'http://iptv.tapesh.tv/tapesh/playlist1/index.m3u8', 'US')],
+  },
+  {
+    id: 'caltex-music', name: 'Caltex Music', nameEn: 'Caltex Music', category: 'Music', categoryEn: 'music', country: 'US', platform: 'SATELLITE + INTERNET',
+    satellite: null, frequency: null, polarization: null, symbolRate: null,
+    sources: [source('caltex:music', 'Direct HLS', 'http://vid1.caltexmusic.com/hls/caltextv.m3u8', 'US')],
+  },
+  {
+    id: 'radio-farda', name: 'Radio Farda', nameEn: 'Radio Farda TV', category: 'News', categoryEn: 'news', country: 'US', platform: 'INTERNET',
+    satellite: null, frequency: null, polarization: null, symbolRate: null,
+    sources: [source('radio-farda:akamaized', 'Direct HLS', 'https://rfe-lh.akamaihd.net/i/rfe_tvmc1@383622/index_0540_av-b.m3u8', 'US')],
+  },
 ];
 
 export const featuredChannels: Channel[] = definitions.map((definition, index) => ({
@@ -106,7 +140,7 @@ export const featuredChannels: Channel[] = definitions.map((definition, index) =
   referer: definition.sources[0]?.referer ?? null,
   origin: definition.sources[0]?.origin ?? null,
   vpn: false,
-  iran: true,
+  iran: false,
   popular: 100 - index,
   vip: false,
   language: 'fa',
@@ -137,9 +171,9 @@ export function mergeFeaturedChannels(channels: Channel[]) {
     return {
       ...channel,
       image: ensureChannelThumbnail(channel.nameEn || channel.name, channel.image || featured.image),
-      url: featured.url,
-      referer: featured.referer,
-      origin: featured.origin,
+      url: featured.url || channel.url,
+      referer: featured.referer ?? channel.referer,
+      origin: featured.origin ?? channel.origin,
       platform: featured.platform,
       satellite: channel.satellite || featured.satellite,
       frequency: channel.frequency || featured.frequency,
@@ -150,5 +184,5 @@ export function mergeFeaturedChannels(channels: Channel[]) {
   });
 
   const existing = new Set(result.flatMap(channel => [channel.nameEn.toLowerCase(), channel.name.toLowerCase()]));
-  return [...result, ...featuredChannels.filter(channel => !existing.has(channel.nameEn.toLowerCase()) && !existing.has(channel.name.toLowerCase()))];
+  return [...result, ...featuredChannels.filter(channel => channel.sources.length > 0 && !existing.has(channel.nameEn.toLowerCase()) && !existing.has(channel.name.toLowerCase()))];
 }
