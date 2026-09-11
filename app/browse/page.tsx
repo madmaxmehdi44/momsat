@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import Link from 'next/link';
 import { getCatalog } from '../../lib/catalog-db';
-import LiveChannelCatalog from '../../components/LiveChannelCatalogFinal';
+import LiveChannelCatalog from '../../components/LiveChannelCatalogFixed';
 
 export default async function Browse({ searchParams }: { searchParams: Promise<{ q?: string; category?: string }> }) {
   const sp = await searchParams;
