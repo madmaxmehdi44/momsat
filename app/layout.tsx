@@ -1,5 +1,6 @@
 import './globals.css';
 import './momsat-theme.css';
+import './theme-polish.css';
 import BrowserCompatibility from '../components/BrowserCompatibility';
 import InteractionFeedback from '../components/InteractionFeedback';
 import HomeVisualHardening from '../components/HomeVisualHardening';
@@ -11,10 +12,7 @@ import ThemeSync from '../components/ThemeSync';
 export const metadata = {
   title: 'MOMSAT — Persian Live TV',
   description: 'Persian live TV discovery platform',
-  icons: {
-    icon: '/icon.svg',
-    shortcut: '/icon.svg',
-  },
+  icons: { icon: '/icon.svg', shortcut: '/icon.svg' },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
