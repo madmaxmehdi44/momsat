@@ -94,18 +94,41 @@ export default function PlayerProEnhanced({ channel }: { channel: { id?: number;
     if (!video) return;
     video.style.objectFit = settings.fit;
     video.playbackRate = settings.playbackRate;
-    video.muted = settings.mutedStart;
-    video.volume = settings.volume;
 
     if (!settings.autoplay) {
+      video.muted = settings.mutedStart;
+      video.volume = settings.volume;
       video.pause();
       return;
     }
+
+    const userActivated = typeof navigator !== 'undefined' && 'userActivation' in navigator && Boolean(navigator.userActivation?.hasBeenActive);
+    const allowUnmutedStart = settings.mutedStart || userActivated || Date.now() <= autoplayGestureUntil.current;
+    video.muted = allowUnmutedStart ? settings.mutedStart : true;
+    video.volume = settings.volume;
 
     if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.paused) {
       void video.play().catch(() => undefined);
     }
   }, [getVideo, settings.autoplay, settings.fit, settings.mutedStart, settings.playbackRate, settings.volume, settingsReady, channel.id]);
+
+  useEffect(() => {
+    if (!settingsReady || settings.mutedStart) return;
+    const root = shellRef.current;
+    if (!root) return;
+    const activateAudio = () => {
+      const video = getVideo();
+      if (!video) return;
+      video.muted = false;
+      video.volume = settings.volume;
+    };
+    root.addEventListener('pointerdown', activateAudio, true);
+    root.addEventListener('keydown', activateAudio, true);
+    return () => {
+      root.removeEventListener('pointerdown', activateAudio, true);
+      root.removeEventListener('keydown', activateAudio, true);
+    };
+  }, [getVideo, settings.mutedStart, settings.volume, settingsReady]);
 
   useEffect(() => {
     if (settings.defaultQuality === 'auto' || !shellRef.current || !settingsReady) return;
@@ -149,7 +172,10 @@ export default function PlayerProEnhanced({ channel }: { channel: { id?: number;
     video.pause();
     video.load();
     qualityApplyStarted.current = false;
-    if (settings.autoplay) void video.play().catch(() => undefined);
+    if (settings.autoplay) {
+      video.muted = true;
+      void video.play().catch(() => undefined);
+    }
   }, [getVideo, settings.autoplay]);
 
   const fullscreen = useCallback(() => {
