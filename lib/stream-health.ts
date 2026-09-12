@@ -1,7 +1,6 @@
 import type { StreamHealthStatus as PrismaStreamHealthStatus } from '@prisma/client';
 import type { Channel } from './source';
 import { withDbReadTimeout, withDbTimeout } from './db-timeout';
-import { prisma } from './prisma';
 
 export type StreamHealthStatus = PrismaStreamHealthStatus;
 
@@ -28,6 +27,7 @@ const CHANNEL_EXISTS_TTL_MS = 5 * 60_000;
 const CHANNEL_MISSING_TTL_MS = 30_000;
 const SOURCE_EXISTS_TTL_MS = 2 * 60_000;
 const SOURCE_MISSING_TTL_MS = 15_000;
+const SOURCE_CACHE_MAX_ENTRIES = 10_000;
 const HEALTH_RECENCY_WINDOW_MS = 6 * 60 * 60_000;
 const channelExistenceCache = new Map<number, { exists: boolean; expiresAt: number }>();
 const sourceRegistrationCache = new Map<string, { exists: boolean; expiresAt: number }>();
@@ -109,9 +109,21 @@ async function persistedChannelExists(channelId: number) {
   }
 }
 
+function pruneSourceRegistrationCache(nowMs = Date.now()) {
+  for (const [key, entry] of sourceRegistrationCache) {
+    if (entry.expiresAt <= nowMs) sourceRegistrationCache.delete(key);
+  }
+  while (sourceRegistrationCache.size > SOURCE_CACHE_MAX_ENTRIES) {
+    const oldestKey = sourceRegistrationCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    sourceRegistrationCache.delete(oldestKey);
+  }
+}
+
 async function persistedSourceExists(channelId: number, url: string) {
   const normalizedUrl = normalizeUrl(url);
   if (!process.env.DATABASE_URL?.trim() || !Number.isInteger(channelId) || channelId <= 0 || !normalizedUrl) return false;
+  pruneSourceRegistrationCache();
   const cacheKey = `${channelId}|${normalizedUrl}`;
   const cached = sourceRegistrationCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.exists;
@@ -128,6 +140,7 @@ async function persistedSourceExists(channelId: number, url: string) {
     }));
     const exists = Boolean(row);
     sourceRegistrationCache.set(cacheKey, { exists, expiresAt: Date.now() + (exists ? SOURCE_EXISTS_TTL_MS : SOURCE_MISSING_TTL_MS) });
+    pruneSourceRegistrationCache();
     return exists;
   } catch (error) {
     console.warn('[stream-health] Failed to verify registered stream source.', error);
@@ -229,6 +242,9 @@ export async function updateStreamHealth(input: { channelId: number; url: string
         if (channel?.url === url) await tx.channel.update({ where: { id: input.channelId }, data: { url: targetUrl } });
       }
       await tx.streamHealth.update({ where: { id: record.id }, data: { url: targetUrl } });
+      const cacheKey = `${input.channelId}|${url}`;
+      sourceRegistrationCache.delete(cacheKey);
+      pruneSourceRegistrationCache();
     }
     if (input.status === 'HEALTHY') await tx.channel.updateMany({ where: { id: input.channelId, archiveStatus: 'SHUTDOWN' }, data: { archiveStatus: null, archiveNote: null, archiveSince: null } });
     return record;
