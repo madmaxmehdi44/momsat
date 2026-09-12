@@ -1,0 +1,16 @@
+:root{--shadow-sm:0 6px 20px rgba(0,0,0,.18);--shadow-md:0 14px 40px rgba(0,0,0,.24);--focus-ring:0 0 0 3px color-mix(in srgb,var(--accent) 24%,transparent)}
+html[data-momsat-theme='midnight']{--bg:#090b10;--panel:#111722;--line:#273142;--text:#f5f7fb;--muted:#96a3b5;--accent:#ff315b;--accent2:#ff1744;--shadow-sm:0 6px 22px rgba(0,0,0,.28);--shadow-md:0 18px 55px rgba(0,0,0,.36)}
+html[data-momsat-theme='aurora']{--shadow-sm:0 8px 26px rgba(0,0,0,.25);--shadow-md:0 18px 60px rgba(0,0,0,.34)}
+html[data-momsat-theme='light']{--shadow-sm:0 5px 18px rgba(28,43,61,.08);--shadow-md:0 14px 40px rgba(28,43,61,.12)}
+body{transition:background-color .2s ease,color .2s ease}
+button,input,select,textarea{font:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;box-shadow:var(--focus-ring)}
+html[data-momsat-theme='midnight'] .card,html[data-momsat-theme='midnight'] .hero-card,html[data-momsat-theme='midnight'] .detail-grid>div,html[data-momsat-theme='midnight'] .kpi,html[data-momsat-theme='midnight'] .guide-row{box-shadow:var(--shadow-sm)}
+html[data-momsat-theme='midnight'] .card{background:linear-gradient(180deg,#141a24,#0d121a)}
+html[data-momsat-theme='midnight'] .thumb{background:linear-gradient(135deg,#1a2432,#0b1017)}
+html[data-momsat-theme='midnight'] .btn{background:#151c27;color:var(--text);border-color:var(--line)}
+html[data-momsat-theme='midnight'] .browse-head input{background:#111822;color:var(--text)}
+html[data-momsat-theme='midnight'] .admin-table{background:#0d131c}
+html[data-momsat-theme='midnight'] .admin-table th{background:#151c27}
+html[data-momsat-theme='midnight'] .notice{background:#151d29;border-color:#2b394c}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
