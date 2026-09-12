@@ -9,7 +9,7 @@ import StreamHealthObserver from './StreamHealthObserver';
 import styles from './PersistentPlayerProvider.module.css';
 
 type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
-export type PersistentChannel = { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
+export type PersistentChannel = { id?: number; channelId?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
 type PlayerHostRect = { top: number; left: number; width: number; height: number };
 type CatalogResponse = { channels?: PersistentChannel[] };
 type MiniPosition = { left: number; top: number };
@@ -29,12 +29,17 @@ const MINI_WIDTH = 420;
 const MINI_GAP = 16;
 const PersistentPlayerContext = createContext<PersistentPlayerContextValue | null>(null);
 
+function persistentChannelId(channel: PersistentChannel | null | undefined) {
+  const id = channel?.id ?? channel?.channelId;
+  return typeof id === 'number' && Number.isInteger(id) && id > 0 ? id : null;
+}
+
 function channelKey(channel: PersistentChannel) {
-  return JSON.stringify({ id: channel.id ?? null, name: channel.name ?? '', image: channel.image ?? null, url: channel.url ?? null, referer: channel.referer ?? null, origin: channel.origin ?? null, sources: (channel.sources ?? []).map((source) => ({ url: source.url, title: source.title ?? null, referer: source.referer ?? null, origin: source.origin ?? null, country: source.country ?? null, vip: source.vip ?? false })) });
+  return JSON.stringify({ id: persistentChannelId(channel), name: channel.name ?? '', image: channel.image ?? null, url: channel.url ?? null, referer: channel.referer ?? null, origin: channel.origin ?? null, sources: (channel.sources ?? []).map((source) => ({ url: source.url, title: source.title ?? null, referer: source.referer ?? null, origin: source.origin ?? null, country: source.country ?? null, vip: source.vip ?? false })) });
 }
 
 function isCurrentWatchRoute(pathname: string | null, channel: PersistentChannel | null) {
-  const id = channel?.id;
+  const id = persistentChannelId(channel);
   if (!pathname || id == null) return false;
   const normalized = pathname.replace(/\/+$/, '');
   return normalized === `/channel/${id}` || normalized === '/watch';
@@ -120,7 +125,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
       const channelId = Number(watchMatch[1]);
       if (!Number.isFinite(channelId)) return;
       void loadCatalog().then((channels) => {
-        const channel = channels.find((item) => item.id === channelId);
+        const channel = channels.find((item) => persistentChannelId(item) === channelId);
         if (channel) setActiveChannel(channel);
       }).catch(() => undefined);
     };
@@ -154,7 +159,6 @@ export default function PersistentPlayerProvider({ children }: { children: React
 
   const value = useMemo(() => ({ activeChannel, expanded, setActiveChannel, play, stopPlayer, registerPlayerHost }), [activeChannel, expanded, setActiveChannel, play, stopPlayer, registerPlayerHost]);
   const portalTarget = typeof document !== 'undefined' ? document.body : null;
-  const canRenderPlayer = Boolean(activeChannel && !collapsed && portalTarget && (!expanded || hostRect));
   const player = activeChannel && !collapsed && portalTarget && (!expanded || hostRect) ? createPortal(
     <aside className={`${styles.root} ${expanded ? styles.expanded : styles.mini}`} style={expanded && hostRect ? { top: hostRect.top, left: hostRect.left, width: hostRect.width, height: hostRect.height } : miniPosition ? { left: miniPosition.left, top: miniPosition.top } : undefined} aria-label="MOMSAT player">
       <div className={styles.inner}>
