@@ -9,7 +9,7 @@ export default function BrowsePlayerGuard() {
   const { stopPlayer } = usePersistentPlayer();
 
   useEffect(() => {
-    if (pathname !== '/browse' && pathname !== '/') return;
+    if (pathname !== '/') return;
     const timer = window.setTimeout(() => stopPlayer(), 0);
     return () => window.clearTimeout(timer);
   }, [pathname, stopPlayer]);
