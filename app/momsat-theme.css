@@ -1,0 +1,94 @@
+/* Canonical theme bridge for the Home/Discovery shell. */
+[class*="YouTubeBrowseShellV2_shell"] {
+  --momsat-bg: var(--bg, #0f0f0f);
+  --momsat-panel: var(--panel, #171717);
+  --momsat-panel-2: color-mix(in srgb, var(--momsat-panel) 82%, var(--momsat-bg));
+  --momsat-text: var(--text, #f1f1f1);
+  --momsat-muted: var(--muted, #898989);
+  --momsat-line: var(--line, #242424);
+  --momsat-accent: var(--accent, #ff0033);
+  --red: var(--momsat-accent);
+  background: var(--momsat-bg) !important;
+  color: var(--momsat-text) !important;
+}
+
+[class*="YouTubeBrowseShellV2_header"],
+[class*="YouTubeBrowseShellV2_sidebar"],
+[class*="YouTubeBrowseShellV2_categoryBar"] {
+  background-color: var(--momsat-bg) !important;
+  border-color: var(--momsat-line) !important;
+}
+
+[class*="YouTubeBrowseShellV2_search"],
+[class*="YouTubeBrowseShellV2_hero"],
+[class*="YouTubeBrowseShellV2_empty"],
+[class*="YouTubeBrowseShellV2_thumb"] {
+  background-color: var(--momsat-panel) !important;
+  border-color: var(--momsat-line) !important;
+}
+
+[class*="YouTubeBrowseShellV2_search"] {
+  color: var(--momsat-muted) !important;
+}
+
+[class*="YouTubeBrowseShellV2_search"] input,
+[class*="YouTubeBrowseShellV2_cardTitle"],
+[class*="YouTubeBrowseShellV2_hero"] h1,
+[class*="YouTubeBrowseShellV2_hero"] p,
+[class*="YouTubeBrowseShellV2_railHeader"] h2,
+[class*="YouTubeBrowseShellV2_gridHeading"] h2 {
+  color: var(--momsat-text) !important;
+}
+
+[class*="YouTubeBrowseShellV2_search"] input::placeholder,
+[class*="YouTubeBrowseShellV2_cardMeta"],
+[class*="YouTubeBrowseShellV2_cardSub"],
+[class*="YouTubeBrowseShellV2_railHeader"] p,
+[class*="YouTubeBrowseShellV2_gridHeading"] p {
+  color: var(--momsat-muted) !important;
+}
+
+[class*="YouTubeBrowseShellV2_navItem"],
+[class*="YouTubeBrowseShellV2_categoryChip"],
+[class*="YouTubeBrowseShellV2_railActions"] button,
+[class*="YouTubeBrowseShellV2_gridHeading"] button {
+  color: var(--momsat-text) !important;
+  border-color: var(--momsat-line) !important;
+  background-color: var(--momsat-panel-2) !important;
+}
+
+[class*="YouTubeBrowseShellV2_navActive"],
+[class*="YouTubeBrowseShellV2_categorySelected"] {
+  background: var(--momsat-text) !important;
+  color: var(--momsat-bg) !important;
+  border-color: var(--momsat-text) !important;
+}
+
+[class*="YouTubeBrowseShellV2_categorySelected"] em {
+  background: var(--momsat-panel-2) !important;
+  color: var(--momsat-text) !important;
+}
+
+[class*="YouTubeBrowseShellV2_heroImage"]::after {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--momsat-bg) 92%, transparent) 0%, color-mix(in srgb, var(--momsat-bg) 72%, transparent) 38%, transparent 72%, color-mix(in srgb, var(--momsat-bg) 50%, transparent) 100%) !important;
+}
+
+[class*="YouTubeBrowseShellV2_live"],
+[class*="YouTubeBrowseShellV2_heroEyebrow"] i {
+  background-color: var(--momsat-accent) !important;
+}
+
+[class*="YouTubeBrowseShellV2_logo"] span,
+[class*="YouTubeBrowseShellV2_navActive"] svg {
+  color: var(--momsat-accent) !important;
+}
+
+[class*="YouTubeBrowseShellV2_hero"] {
+  box-shadow: 0 14px 40px color-mix(in srgb, var(--momsat-bg) 65%, transparent) !important;
+}
+
+@media (prefers-color-scheme: light) {
+  [class*="YouTubeBrowseShellV2_heroImage"]::after {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--momsat-bg) 92%, transparent) 0%, color-mix(in srgb, var(--momsat-bg) 74%, transparent) 38%, transparent 72%, color-mix(in srgb, var(--momsat-bg) 45%, transparent) 100%) !important;
+  }
+}

@@ -6,6 +6,7 @@ import { ttlDelete, ttlGet, ttlGetOrSet, ttlSet } from './ttl-cache';
 import { rankCatalogChannels } from './catalog-ranking';
 import { mergeFeaturedChannels } from './featured-channels';
 import { applyStreamHealth } from './stream-health';
+import { withDbReadTimeout } from './db-timeout';
 
 export type { Channel };
 
@@ -22,13 +23,12 @@ type DbChannel = Awaited<ReturnType<typeof prisma.channel.findMany>>[number] & {
   sources: Array<{ id: number; title: string | null; url: string; referer: string | null; origin: string | null; country: string | null; vip: boolean }>;
 };
 
-const DB_CATALOG_TIMEOUT_MS = Math.max(1500, Number(process.env.CATALOG_DB_TIMEOUT_MS || 3000));
+const DB_CATALOG_TIMEOUT_MS = Math.max(750, Number(process.env.CATALOG_DB_TIMEOUT_MS || 1500));
 const DB_FAILURE_BACKOFF_MS = Math.max(5_000, Number(process.env.CATALOG_DB_FAILURE_BACKOFF_MS || 30_000));
-const STREAM_HEALTH_TIMEOUT_MS = 700;
 const SOURCE_FALLBACK_CACHE_TTL_MS = Math.max(60_000, Number(process.env.CATALOG_SOURCE_FALLBACK_TTL_MS || 600_000));
 
-export const CATALOG_CACHE_KEY = 'momsat:catalog:v8:database-first-health-ranked-reliable-thumbnails-with-db-backoff';
-const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:source-fallback-v1`;
+export const CATALOG_CACHE_KEY = 'momsat:catalog:v9:db-read-timeout-health-ranked-reliable-thumbnails';
+const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:source-fallback-v2`;
 
 let dbBackoffUntil = 0;
 
@@ -64,25 +64,10 @@ function toCatalog(channel: DbChannel): Channel {
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => resolve(fallback), timeoutMs);
-    promise.then((value) => {
-      clearTimeout(timer);
-      resolve(value);
-    }).catch((error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-  });
-}
-
 async function normalizeCatalog(channels: Channel[], includeHealth: boolean) {
   const merged = mergeFeaturedChannels(channels);
   const ranked = rankCatalogChannels(merged);
-  const healthApplied = includeHealth
-    ? await withTimeout(applyStreamHealth(ranked), STREAM_HEALTH_TIMEOUT_MS, ranked)
-    : ranked;
+  const healthApplied = includeHealth ? await applyStreamHealth(ranked) : ranked;
   return healthApplied.map((channel) => ({
     ...channel,
     image: channel.image || fallbackChannelThumbnail(channel.nameEn || channel.name, channel.category),
@@ -94,26 +79,17 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
   if (Date.now() < dbBackoffUntil) return null;
 
   try {
-    const timeout = new Promise<null>((resolve) => {
-      setTimeout(() => resolve(null), DB_CATALOG_TIMEOUT_MS);
-    });
-    const databaseLoad = prisma.channel.findMany({
+    const result = await withDbReadTimeout((tx) => tx.channel.findMany({
       where: { archiveStatus: null },
       orderBy: [{ popular: 'desc' }, { name: 'asc' }],
       include: dbInclude,
-    }).then((rows) => normalizeCatalog(rows.map(toCatalog), true));
+    }).then((rows) => normalizeCatalog(rows.map(toCatalog), true)), DB_CATALOG_TIMEOUT_MS);
 
-    const result = await Promise.race([databaseLoad, timeout]);
-    if (result === null) {
-      dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
-      console.warn(`[catalog-db] Database catalog timed out after ${DB_CATALOG_TIMEOUT_MS}ms; serving warm fallback catalog while DB is cooling down for ${DB_FAILURE_BACKOFF_MS}ms.`);
-      return null;
-    }
     dbBackoffUntil = 0;
     return result;
   } catch (error) {
     dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
-    console.warn(`[catalog-db] Database unavailable; serving warm fallback catalog for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
+    console.warn(`[catalog-db] Database unavailable; serving warm fallback for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
     return null;
   }
 }
@@ -171,14 +147,14 @@ export async function findChannel(id: number) {
   if (!Number.isInteger(id) || id <= 0) return null;
   if (process.env.DATABASE_URL?.trim() && Date.now() >= dbBackoffUntil) {
     try {
-      const row = await prisma.channel.findUnique({ where: { id }, include: dbInclude });
+      const row = await withDbReadTimeout((tx) => tx.channel.findUnique({ where: { id }, include: dbInclude }), DB_CATALOG_TIMEOUT_MS);
       if (row) {
         const [channel] = await normalizeCatalog([toCatalog(row)], true);
         if (channel) return channel;
       }
     } catch (error) {
       dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
-      console.warn('[catalog-db] Database unavailable while resolving channel, using cached catalog.', error);
+      console.warn('[catalog-db] Database unavailable while resolving channel; using cached catalog.', error);
     }
   }
   const channels = await getCatalog();

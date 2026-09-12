@@ -1,32 +1,42 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '../../../lib/prisma';
 import { catalogSourceAdapters } from '../../../lib/source';
+import { withDbReadTimeout, dbReadTimeoutMs } from '../../../lib/db-timeout';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const DB_HEALTH_TIMEOUT_MS = 1200;
+const HEALTH_CACHE_TTL_MS = Math.max(5_000, Number(process.env.DB_HEALTH_CACHE_TTL_MS || 15_000));
+let cached: { expiresAt: number; payload: { ok: boolean; database: 'ok' | 'unconfigured' | 'error'; catalog: { channels: number; sources: number } } } | null = null;
 
 export async function GET() {
-  let database: 'ok' | 'unconfigured' | 'error' = 'unconfigured';
-  let channels = 0;
-  let sources = 0;
+  let payload = cached && cached.expiresAt > Date.now() ? cached.payload : null;
 
-  if (process.env.DATABASE_URL?.trim()) {
-    try {
-      const counts = Promise.all([prisma.channel.count(), prisma.source.count()]);
-      const timeout = new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), DB_HEALTH_TIMEOUT_MS);
-      });
-      const result = await Promise.race([counts, timeout]);
-      if (result) {
-        [channels, sources] = result;
+  if (!payload) {
+    let database: 'ok' | 'unconfigured' | 'error' = 'unconfigured';
+    let channels = 0;
+    let sources = 0;
+
+    if (process.env.DATABASE_URL?.trim()) {
+      try {
+        [channels, sources] = await withDbReadTimeout((tx) => Promise.all([
+          tx.channel.count(),
+          tx.source.count(),
+        ]), dbReadTimeoutMs());
         database = 'ok';
-      } else {
+      } catch {
         database = 'error';
       }
-    } catch {
-      database = 'error';
+    }
+
+    payload = {
+      ok: database !== 'error',
+      database,
+      catalog: { channels, sources },
+    };
+
+    if (database === 'ok' || database === 'unconfigured') {
+      cached = { expiresAt: Date.now() + HEALTH_CACHE_TTL_MS, payload };
     }
   }
 
@@ -36,12 +46,9 @@ export async function GET() {
     configured: adapter.isConfigured(),
   }));
 
-  const ok = database !== 'error';
   return NextResponse.json({
-    ok,
-    database,
-    catalog: { channels, sources },
+    ...payload,
     adapters,
     timestamp: new Date().toISOString(),
-  }, { status: ok ? 200 : 503 });
+  }, { status: payload.ok ? 200 : 503 });
 }

@@ -1,6 +1,6 @@
-import { prisma } from './prisma';
 import type { StreamHealthStatus as PrismaStreamHealthStatus } from '@prisma/client';
 import type { Channel } from './source';
+import { withDbReadTimeout, withDbTimeout } from './db-timeout';
 
 export type StreamHealthStatus = PrismaStreamHealthStatus;
 
@@ -23,24 +23,17 @@ type HealthRecord = {
 
 const BROKEN_STREAK = 3;
 const MAX_ERROR_LENGTH = 500;
-const channelExistenceCache = new Map<number, { exists: boolean; expiresAt: number }>();
 const CHANNEL_EXISTS_TTL_MS = 5 * 60_000;
 const CHANNEL_MISSING_TTL_MS = 30_000;
 const HEALTH_RECENCY_WINDOW_MS = 6 * 60 * 60_000;
+const channelExistenceCache = new Map<number, { exists: boolean; expiresAt: number }>();
 
-function normalizeUrl(url: string) {
-  return url.trim();
-}
-
+function normalizeUrl(url: string) { return url.trim(); }
 function safeError(error: unknown) {
   const value = error instanceof Error ? error.message : String(error ?? 'Unknown stream error');
   return value.trim().slice(0, MAX_ERROR_LENGTH);
 }
-
-function now() {
-  return new Date();
-}
-
+function now() { return new Date(); }
 function recencyPenalty(lastFailureAt: Date | null) {
   if (!lastFailureAt) return 0;
   const age = Math.max(0, Date.now() - lastFailureAt.getTime());
@@ -48,16 +41,10 @@ function recencyPenalty(lastFailureAt: Date | null) {
   return 18 * (1 - age / HEALTH_RECENCY_WINDOW_MS);
 }
 
-/**
- * Runtime source score used to choose the most trustworthy stream path.
- * The score intentionally combines reliability, recent failures and latency;
- * a single slow sample must not outweigh a strong playback history.
- */
 export function streamHealthScore(record: HealthRecord | undefined) {
   if (!record) return 45;
   if (record.status === 'ARCHIVED') return -1000;
   if (record.status === 'BROKEN') return -900;
-
   const total = Math.max(0, record.successCount + record.failureCount);
   const successRate = total > 0 ? record.successCount / total : 0.5;
   const reliabilityScore = successRate * 42;
@@ -66,18 +53,14 @@ export function streamHealthScore(record: HealthRecord | undefined) {
   const latencyScore = latency == null ? 8 : Math.max(0, 20 - Math.min(20, latency / 100));
   const recentFailurePenalty = recencyPenalty(record.lastFailureAt);
   const streakPenalty = Math.min(22, record.failureStreak * 6);
-
-  if (record.status === 'SUSPECT') {
-    return Math.max(0, 18 + reliabilityScore * 0.55 + latencyScore * 0.5 - recentFailurePenalty - streakPenalty);
-  }
-
+  if (record.status === 'SUSPECT') return Math.max(0, 18 + reliabilityScore * 0.55 + latencyScore * 0.5 - recentFailurePenalty - streakPenalty);
   return 38 + reliabilityScore + experienceScore + latencyScore - recentFailurePenalty - streakPenalty;
 }
 
 export async function getStreamHealthForChannels(channelIds: number[]) {
   if (!process.env.DATABASE_URL?.trim() || !channelIds.length) return new Map<string, HealthRecord>();
   try {
-    const rows = await prisma.streamHealth.findMany({ where: { channelId: { in: channelIds } } });
+    const rows = await withDbReadTimeout((tx) => tx.streamHealth.findMany({ where: { channelId: { in: channelIds } } }));
     return new Map(rows.map((row) => [`${row.channelId}|${normalizeUrl(row.url)}`, row as HealthRecord]));
   } catch (error) {
     console.warn('[stream-health] Failed to load health records.', error);
@@ -87,43 +70,32 @@ export async function getStreamHealthForChannels(channelIds: number[]) {
 
 export async function applyStreamHealth(channels: Channel[]) {
   if (!channels.length || !process.env.DATABASE_URL?.trim()) return channels;
-
   const health = await getStreamHealthForChannels(channels.map((channel) => channel.id));
-  return channels
-    .map((channel) => {
-      const sources = (channel.sources ?? [])
-        .filter((source) => {
-          const record = health.get(`${channel.id}|${normalizeUrl(source.url)}`);
-          return record?.status !== 'BROKEN' && record?.status !== 'ARCHIVED';
-        })
-        .sort((a, b) => {
-          const left = health.get(`${channel.id}|${normalizeUrl(a.url)}`);
-          const right = health.get(`${channel.id}|${normalizeUrl(b.url)}`);
-          const scoreDelta = streamHealthScore(right) - streamHealthScore(left);
-          if (scoreDelta !== 0) return scoreDelta;
-          if (Boolean(a.vip) !== Boolean(b.vip)) return a.vip ? 1 : -1;
-          return a.url.localeCompare(b.url);
-        });
-
-      const primary = sources[0] ?? null;
-      return {
-        ...channel,
-        url: primary?.url ?? '',
-        referer: primary?.referer ?? null,
-        origin: primary?.origin ?? null,
-        sources,
-      };
-    })
-    .filter((channel) => channel.sources.length > 0 && channel.url);
+  return channels.map((channel) => {
+    const sources = (channel.sources ?? [])
+      .filter((source) => {
+        const record = health.get(`${channel.id}|${normalizeUrl(source.url)}`);
+        return record?.status !== 'BROKEN' && record?.status !== 'ARCHIVED';
+      })
+      .sort((a, b) => {
+        const left = health.get(`${channel.id}|${normalizeUrl(a.url)}`);
+        const right = health.get(`${channel.id}|${normalizeUrl(b.url)}`);
+        const scoreDelta = streamHealthScore(right) - streamHealthScore(left);
+        if (scoreDelta !== 0) return scoreDelta;
+        if (Boolean(a.vip) !== Boolean(b.vip)) return a.vip ? 1 : -1;
+        return a.url.localeCompare(b.url);
+      });
+    const primary = sources[0] ?? null;
+    return { ...channel, url: primary?.url ?? '', referer: primary?.referer ?? null, origin: primary?.origin ?? null, sources };
+  }).filter((channel) => channel.sources.length > 0 && channel.url);
 }
 
 async function persistedChannelExists(channelId: number) {
   if (!process.env.DATABASE_URL?.trim() || !Number.isInteger(channelId) || channelId <= 0) return false;
   const cached = channelExistenceCache.get(channelId);
   if (cached && cached.expiresAt > Date.now()) return cached.exists;
-
   try {
-    const row = await prisma.channel.findUnique({ where: { id: channelId }, select: { id: true } });
+    const row = await withDbReadTimeout((tx) => tx.channel.findUnique({ where: { id: channelId }, select: { id: true } }));
     const exists = Boolean(row);
     channelExistenceCache.set(channelId, { exists, expiresAt: Date.now() + (exists ? CHANNEL_EXISTS_TTL_MS : CHANNEL_MISSING_TTL_MS) });
     return exists;
@@ -135,39 +107,37 @@ async function persistedChannelExists(channelId: number) {
 
 async function quarantineChannelIfAllSourcesBroken(channelId: number) {
   if (!process.env.DATABASE_URL?.trim()) return;
-  const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { archiveStatus: true, url: true, sources: { select: { url: true } } } });
-  if (!channel || channel.archiveStatus) return;
-
-  const urls = Array.from(new Set([channel.url, ...channel.sources.map((source) => source.url)].filter(Boolean).map(normalizeUrl)));
-  if (!urls.length) return;
-
-  const records = await prisma.streamHealth.findMany({ where: { channelId, url: { in: urls } }, select: { url: true, status: true } });
-  const statusByUrl = new Map(records.map((record) => [normalizeUrl(record.url), record.status]));
-  const allKnownBroken = urls.every((url) => statusByUrl.get(url) === 'BROKEN' || statusByUrl.get(url) === 'ARCHIVED');
-  if (!allKnownBroken) return;
-
-  await prisma.channel.update({ where: { id: channelId }, data: { archiveStatus: 'SHUTDOWN', archiveNote: 'Automatically removed from the active catalog because every registered stream path is quarantined.', archiveSince: now() } });
+  await withDbTimeout(async (tx) => {
+    const channel = await tx.channel.findUnique({ where: { id: channelId }, select: { archiveStatus: true, url: true, sources: { select: { url: true } } } });
+    if (!channel || channel.archiveStatus) return;
+    const urls = Array.from(new Set([channel.url, ...channel.sources.map((source) => source.url)].filter(Boolean).map(normalizeUrl)));
+    if (!urls.length) return;
+    const records = await tx.streamHealth.findMany({ where: { channelId, url: { in: urls } }, select: { url: true, status: true } });
+    const statusByUrl = new Map(records.map((record) => [normalizeUrl(record.url), record.status]));
+    const allKnownBroken = urls.every((url) => statusByUrl.get(url) === 'BROKEN' || statusByUrl.get(url) === 'ARCHIVED');
+    if (!allKnownBroken) return;
+    await tx.channel.update({ where: { id: channelId }, data: { archiveStatus: 'SHUTDOWN', archiveNote: 'Automatically removed from the active catalog because every registered stream path is quarantined.', archiveSince: now() } });
+  });
 }
 
 export async function reportStreamSuccess(input: { channelId: number; url: string; latencyMs?: number | null }) {
   if (!process.env.DATABASE_URL?.trim() || !input.channelId || !normalizeUrl(input.url)) return;
   if (!(await persistedChannelExists(input.channelId))) return;
-
   const url = normalizeUrl(input.url);
   const checkedAt = now();
   try {
-    const existing = await prisma.streamHealth.findUnique({ where: { channelId_url: { channelId: input.channelId, url } } });
-    const previousAverage = existing?.averageLatencyMs ?? null;
-    const latency = Number.isFinite(input.latencyMs) ? Math.max(0, Math.round(Number(input.latencyMs))) : null;
-    const averageLatency = latency == null ? previousAverage : previousAverage == null ? latency : Math.round(previousAverage * 0.7 + latency * 0.3);
-
-    await prisma.streamHealth.upsert({
-      where: { channelId_url: { channelId: input.channelId, url } },
-      create: { channelId: input.channelId, url, status: 'HEALTHY', successCount: 1, failureCount: 0, failureStreak: 0, lastCheckedAt: checkedAt, lastSuccessAt: checkedAt, lastLatencyMs: latency, averageLatencyMs: averageLatency },
-      update: { status: 'HEALTHY', successCount: { increment: 1 }, failureStreak: 0, lastCheckedAt: checkedAt, lastSuccessAt: checkedAt, lastLatencyMs: latency, averageLatencyMs: averageLatency, disabledAt: null, disabledReason: null, lastError: null },
+    await withDbTimeout(async (tx) => {
+      const existing = await tx.streamHealth.findUnique({ where: { channelId_url: { channelId: input.channelId, url } } });
+      const previousAverage = existing?.averageLatencyMs ?? null;
+      const latency = Number.isFinite(input.latencyMs) ? Math.max(0, Math.round(Number(input.latencyMs))) : null;
+      const averageLatency = latency == null ? previousAverage : previousAverage == null ? latency : Math.round(previousAverage * 0.7 + latency * 0.3);
+      await tx.streamHealth.upsert({
+        where: { channelId_url: { channelId: input.channelId, url } },
+        create: { channelId: input.channelId, url, status: 'HEALTHY', successCount: 1, failureCount: 0, failureStreak: 0, lastCheckedAt: checkedAt, lastSuccessAt: checkedAt, lastLatencyMs: latency, averageLatencyMs: averageLatency },
+        update: { status: 'HEALTHY', successCount: { increment: 1 }, failureStreak: 0, lastCheckedAt: checkedAt, lastSuccessAt: checkedAt, lastLatencyMs: latency, averageLatencyMs: averageLatency, disabledAt: null, disabledReason: null, lastError: null },
+      });
+      await tx.channel.updateMany({ where: { id: input.channelId, archiveStatus: 'SHUTDOWN' }, data: { archiveStatus: null, archiveNote: null, archiveSince: null } });
     });
-
-    await prisma.channel.updateMany({ where: { id: input.channelId, archiveStatus: 'SHUTDOWN' }, data: { archiveStatus: null, archiveNote: null, archiveSince: null } });
   } catch (error) {
     console.warn('[stream-health] Failed to record success.', error);
   }
@@ -176,25 +146,25 @@ export async function reportStreamSuccess(input: { channelId: number; url: strin
 export async function reportStreamFailure(input: { channelId: number; url: string; error?: unknown; latencyMs?: number | null }) {
   if (!process.env.DATABASE_URL?.trim() || !input.channelId || !normalizeUrl(input.url)) return;
   if (!(await persistedChannelExists(input.channelId))) return;
-
   const url = normalizeUrl(input.url);
   const checkedAt = now();
   try {
-    const existing = await prisma.streamHealth.findUnique({ where: { channelId_url: { channelId: input.channelId, url } } });
-    if (existing?.status === 'ARCHIVED') return;
-
-    const failureStreak = (existing?.failureStreak ?? 0) + 1;
-    const status: StreamHealthStatus = failureStreak >= BROKEN_STREAK ? 'BROKEN' : 'SUSPECT';
-    const latency = Number.isFinite(input.latencyMs) ? Math.max(0, Math.round(Number(input.latencyMs))) : null;
-    const message = safeError(input.error);
-
-    await prisma.streamHealth.upsert({
-      where: { channelId_url: { channelId: input.channelId, url } },
-      create: { channelId: input.channelId, url, status, successCount: 0, failureCount: 1, failureStreak, lastCheckedAt: checkedAt, lastFailureAt: checkedAt, lastLatencyMs: latency, lastError: message, disabledAt: status === 'BROKEN' ? checkedAt : null, disabledReason: status === 'BROKEN' ? 'Automatic health quarantine after repeated playback failures.' : null },
-      update: { status, failureCount: { increment: 1 }, failureStreak, lastCheckedAt: checkedAt, lastFailureAt: checkedAt, lastLatencyMs: latency, lastError: message, disabledAt: status === 'BROKEN' ? (existing?.disabledAt ?? checkedAt) : existing?.disabledAt, disabledReason: status === 'BROKEN' ? (existing?.disabledReason ?? 'Automatic health quarantine after repeated playback failures.') : existing?.disabledReason },
+    let shouldQuarantine = false;
+    await withDbTimeout(async (tx) => {
+      const existing = await tx.streamHealth.findUnique({ where: { channelId_url: { channelId: input.channelId, url } } });
+      if (existing?.status === 'ARCHIVED') return;
+      const failureStreak = (existing?.failureStreak ?? 0) + 1;
+      const status: StreamHealthStatus = failureStreak >= BROKEN_STREAK ? 'BROKEN' : 'SUSPECT';
+      const latency = Number.isFinite(input.latencyMs) ? Math.max(0, Math.round(Number(input.latencyMs))) : null;
+      const message = safeError(input.error);
+      await tx.streamHealth.upsert({
+        where: { channelId_url: { channelId: input.channelId, url } },
+        create: { channelId: input.channelId, url, status, successCount: 0, failureCount: 1, failureStreak, lastCheckedAt: checkedAt, lastFailureAt: checkedAt, lastLatencyMs: latency, lastError: message, disabledAt: status === 'BROKEN' ? checkedAt : null, disabledReason: status === 'BROKEN' ? 'Automatic health quarantine after repeated playback failures.' : null },
+        update: { status, failureCount: { increment: 1 }, failureStreak, lastCheckedAt: checkedAt, lastFailureAt: checkedAt, lastLatencyMs: latency, lastError: message, disabledAt: status === 'BROKEN' ? (existing?.disabledAt ?? checkedAt) : existing?.disabledAt, disabledReason: status === 'BROKEN' ? (existing?.disabledReason ?? 'Automatic health quarantine after repeated playback failures.') : existing?.disabledReason },
+      });
+      shouldQuarantine = status === 'BROKEN';
     });
-
-    if (status === 'BROKEN') await quarantineChannelIfAllSourcesBroken(input.channelId);
+    if (shouldQuarantine) await quarantineChannelIfAllSourcesBroken(input.channelId);
   } catch (error) {
     console.warn('[stream-health] Failed to record failure.', error);
   }
@@ -203,7 +173,7 @@ export async function reportStreamFailure(input: { channelId: number; url: strin
 export async function listProblemStreams() {
   if (!process.env.DATABASE_URL?.trim()) return [];
   try {
-    return await prisma.streamHealth.findMany({ where: { status: { in: ['SUSPECT', 'BROKEN', 'ARCHIVED'] } }, include: { channel: { select: { id: true, name: true, nameEn: true, image: true } } }, orderBy: [{ status: 'desc' }, { failureStreak: 'desc' }, { lastFailureAt: 'desc' }] });
+    return await withDbReadTimeout((tx) => tx.streamHealth.findMany({ where: { status: { in: ['SUSPECT', 'BROKEN', 'ARCHIVED'] } }, include: { channel: { select: { id: true, name: true, nameEn: true, image: true } } }, orderBy: [{ status: 'desc' }, { failureStreak: 'desc' }, { lastFailureAt: 'desc' }] }));
   } catch (error) {
     console.warn('[stream-health] Failed to list problem streams.', error);
     return [];
@@ -213,25 +183,24 @@ export async function listProblemStreams() {
 export async function updateStreamHealth(input: { channelId: number; url: string; status: StreamHealthStatus; newUrl?: string | null; reason?: string | null }) {
   if (!process.env.DATABASE_URL?.trim()) throw new Error('DATABASE_URL is not configured');
   if (!(await persistedChannelExists(input.channelId))) throw new Error('Channel does not exist in the database');
-
   const url = normalizeUrl(input.url);
   const targetUrl = normalizeUrl(input.newUrl ?? '');
-  const record = await prisma.streamHealth.upsert({
-    where: { channelId_url: { channelId: input.channelId, url } },
-    create: { channelId: input.channelId, url, status: input.status, disabledAt: input.status === 'ARCHIVED' || input.status === 'BROKEN' ? now() : null, disabledReason: input.reason?.trim() || null },
-    update: { status: input.status, disabledAt: input.status === 'ARCHIVED' || input.status === 'BROKEN' ? now() : null, disabledReason: input.reason?.trim() || null, ...(input.status === 'HEALTHY' ? { failureStreak: 0, lastError: null } : {}) },
-  });
-
-  if (targetUrl && targetUrl !== url) {
-    const source = await prisma.source.findFirst({ where: { channelId: input.channelId, url } });
-    if (source) await prisma.source.update({ where: { id: source.id }, data: { url: targetUrl } });
-    else {
-      const channel = await prisma.channel.findUnique({ where: { id: input.channelId }, select: { url: true } });
-      if (channel?.url === url) await prisma.channel.update({ where: { id: input.channelId }, data: { url: targetUrl } });
+  return withDbTimeout(async (tx) => {
+    const record = await tx.streamHealth.upsert({
+      where: { channelId_url: { channelId: input.channelId, url } },
+      create: { channelId: input.channelId, url, status: input.status, disabledAt: input.status === 'ARCHIVED' || input.status === 'BROKEN' ? now() : null, disabledReason: input.reason?.trim() || null },
+      update: { status: input.status, disabledAt: input.status === 'ARCHIVED' || input.status === 'BROKEN' ? now() : null, disabledReason: input.reason?.trim() || null, ...(input.status === 'HEALTHY' ? { failureStreak: 0, lastError: null } : {}) },
+    });
+    if (targetUrl && targetUrl !== url) {
+      const source = await tx.source.findFirst({ where: { channelId: input.channelId, url } });
+      if (source) await tx.source.update({ where: { id: source.id }, data: { url: targetUrl } });
+      else {
+        const channel = await tx.channel.findUnique({ where: { id: input.channelId }, select: { url: true } });
+        if (channel?.url === url) await tx.channel.update({ where: { id: input.channelId }, data: { url: targetUrl } });
+      }
+      await tx.streamHealth.update({ where: { id: record.id }, data: { url: targetUrl } });
     }
-    await prisma.streamHealth.update({ where: { id: record.id }, data: { url: targetUrl } });
-  }
-
-  if (input.status === 'HEALTHY') await prisma.channel.updateMany({ where: { id: input.channelId, archiveStatus: 'SHUTDOWN' }, data: { archiveStatus: null, archiveNote: null, archiveSince: null } });
-  return record;
+    if (input.status === 'HEALTHY') await tx.channel.updateMany({ where: { id: input.channelId, archiveStatus: 'SHUTDOWN' }, data: { archiveStatus: null, archiveNote: null, archiveSince: null } });
+    return record;
+  });
 }
