@@ -1,12 +1,22 @@
 'use client';
 
-type Props = { visible: boolean };
+import styles from './MomsatLaunchLoader.module.css';
 
-/**
- * The browse page must render immediately. The catalog/player lifecycle is
- * responsible for real loading state; this decorative overlay is intentionally
- * disabled so it can never mask a slow catalog request or an autoplay attempt.
- */
-export default function MomsatLaunchLoader(_props: Props) {
-  return null;
+type Props = { visible?: boolean };
+
+export default function MomsatLaunchLoader({ visible = true }: Props) {
+  if (!visible) return null;
+
+  return (
+    <main className={styles.screen} aria-busy="true" aria-live="polite" aria-label="در حال بارگذاری MOMSAT">
+      <div className={styles.glow} aria-hidden="true" />
+      <section className={styles.card}>
+        <div className={styles.mark} aria-hidden="true"><span>MOM</span><b>SAT</b></div>
+        <div className={styles.signal} aria-hidden="true"><i /><i /><i /><i /><i /></div>
+        <p className={styles.title}>در حال آماده‌سازی MOMSAT</p>
+        <p className={styles.subtitle}>در حال بارگذاری شبکه‌ها و سرویس پخش زنده</p>
+        <div className={styles.track} aria-hidden="true"><span /></div>
+      </section>
+    </main>
+  );
 }
