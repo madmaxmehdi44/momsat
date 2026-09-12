@@ -77,10 +77,12 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
   });
 }
 
-async function normalizeCatalog(channels: Channel[]) {
+async function normalizeCatalog(channels: Channel[], includeHealth: boolean) {
   const merged = mergeFeaturedChannels(channels);
   const ranked = rankCatalogChannels(merged);
-  const healthApplied = await withTimeout(applyStreamHealth(ranked), STREAM_HEALTH_TIMEOUT_MS, ranked);
+  const healthApplied = includeHealth
+    ? await withTimeout(applyStreamHealth(ranked), STREAM_HEALTH_TIMEOUT_MS, ranked)
+    : ranked;
   return healthApplied.map((channel) => ({
     ...channel,
     image: channel.image || fallbackChannelThumbnail(channel.nameEn || channel.name, channel.category),
@@ -99,7 +101,7 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
       where: { archiveStatus: null },
       orderBy: [{ popular: 'desc' }, { name: 'asc' }],
       include: dbInclude,
-    }).then((rows) => normalizeCatalog(rows.map(toCatalog)));
+    }).then((rows) => normalizeCatalog(rows.map(toCatalog), true));
 
     const result = await Promise.race([databaseLoad, timeout]);
     if (result === null) {
@@ -122,7 +124,7 @@ async function loadSourceFallbackCatalog() {
   const cached = ttlGet<Channel[]>(SOURCE_FALLBACK_CACHE_KEY);
   if (cached && cached.length > 0) return cached;
 
-  const loaded = normalizeCatalog(await fetchCatalog());
+  const loaded = normalizeCatalog(await fetchCatalog(), false);
   ttlSet(SOURCE_FALLBACK_CACHE_KEY, loaded, SOURCE_FALLBACK_CACHE_TTL_MS);
   return loaded;
 }
@@ -159,7 +161,7 @@ export async function findChannel(id: number) {
     try {
       const row = await prisma.channel.findUnique({ where: { id }, include: dbInclude });
       if (row) {
-        const [channel] = await normalizeCatalog([toCatalog(row)]);
+        const [channel] = await normalizeCatalog([toCatalog(row)], true);
         if (channel) return channel;
       }
     } catch (error) {
