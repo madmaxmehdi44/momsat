@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma';
 
 type CsvRow = Record<string, string>;
 
+type LiteralValue = string | number | boolean | null | LiteralValue[] | { [key: string]: LiteralValue };
+
 const DATA_FILE = path.join(process.cwd(), 'prisma', 'seed-data', 'seed-data.csv');
 
 function parseCsv(text: string): CsvRow[] {
@@ -64,35 +66,178 @@ function nullable(value: string): string | null {
   return trimmed ? trimmed : null;
 }
 
+class PythonLiteralParser {
+  private index = 0;
+
+  constructor(private readonly input: string) {}
+
+  parse(): LiteralValue {
+    this.skipWhitespace();
+    const value = this.parseValue();
+    this.skipWhitespace();
+    if (this.index !== this.input.length) {
+      throw new SyntaxError(`Unexpected character at position ${this.index}`);
+    }
+    return value;
+  }
+
+  private parseValue(): LiteralValue {
+    this.skipWhitespace();
+    const char = this.input[this.index];
+
+    if (char === '[') return this.parseList();
+    if (char === '{') return this.parseObject();
+    if (char === '\'' || char === '"') return this.parseString();
+    if (this.input.startsWith('None', this.index)) {
+      this.index += 4;
+      return null;
+    }
+    if (this.input.startsWith('True', this.index)) {
+      this.index += 4;
+      return true;
+    }
+    if (this.input.startsWith('False', this.index)) {
+      this.index += 5;
+      return false;
+    }
+
+    const number = this.input.slice(this.index).match(/^-?\d+(?:\.\d+)?/);
+    if (number) {
+      this.index += number[0].length;
+      return Number(number[0]);
+    }
+
+    throw new SyntaxError(`Unexpected token at position ${this.index}`);
+  }
+
+  private parseList(): LiteralValue[] {
+    this.index += 1;
+    const result: LiteralValue[] = [];
+    this.skipWhitespace();
+    if (this.input[this.index] === ']') {
+      this.index += 1;
+      return result;
+    }
+
+    while (true) {
+      result.push(this.parseValue());
+      this.skipWhitespace();
+      if (this.input[this.index] === ',') {
+        this.index += 1;
+        this.skipWhitespace();
+        if (this.input[this.index] === ']') {
+          this.index += 1;
+          return result;
+        }
+        continue;
+      }
+      if (this.input[this.index] === ']') {
+        this.index += 1;
+        return result;
+      }
+      throw new SyntaxError(`Expected ',' or ']' at position ${this.index}`);
+    }
+  }
+
+  private parseObject(): { [key: string]: LiteralValue } {
+    this.index += 1;
+    const result: { [key: string]: LiteralValue } = {};
+    this.skipWhitespace();
+    if (this.input[this.index] === '}') {
+      this.index += 1;
+      return result;
+    }
+
+    while (true) {
+      this.skipWhitespace();
+      const key = this.parseString();
+      this.skipWhitespace();
+      if (this.input[this.index] !== ':') {
+        throw new SyntaxError(`Expected ':' at position ${this.index}`);
+      }
+      this.index += 1;
+      result[key] = this.parseValue();
+      this.skipWhitespace();
+      if (this.input[this.index] === ',') {
+        this.index += 1;
+        this.skipWhitespace();
+        if (this.input[this.index] === '}') {
+          this.index += 1;
+          return result;
+        }
+        continue;
+      }
+      if (this.input[this.index] === '}') {
+        this.index += 1;
+        return result;
+      }
+      throw new SyntaxError(`Expected ',' or '}' at position ${this.index}`);
+    }
+  }
+
+  private parseString(): string {
+    const quote = this.input[this.index];
+    this.index += 1;
+    let result = '';
+
+    while (this.index < this.input.length) {
+      const char = this.input[this.index++];
+      if (char === quote) return result;
+
+      if (char !== '\\') {
+        result += char;
+        continue;
+      }
+
+      if (this.index >= this.input.length) throw new SyntaxError('Unterminated escape sequence');
+      const escaped = this.input[this.index++];
+      const escapes: Record<string, string> = {
+        n: '\n',
+        r: '\r',
+        t: '\t',
+        b: '\b',
+        f: '\f',
+        v: '\v',
+        '0': '\0',
+        '\\': '\\',
+        "'": "'",
+        '"': '"',
+      };
+      result += escapes[escaped] ?? escaped;
+    }
+
+    throw new SyntaxError('Unterminated string literal');
+  }
+
+  private skipWhitespace() {
+    while (/\s/.test(this.input[this.index] ?? '')) this.index += 1;
+  }
+}
+
 function parseSources(raw: string, channelId: number) {
   if (!raw.trim()) return [];
 
-  // The source column is Python-literal-style data (single quotes / None),
-  // so normalize the representation before parsing it as JSON.
-  const normalized = raw
-    .trim()
-    .replace(/'/g, '"')
-    .replace(/\bNone\b/g, 'null')
-    .replace(/\bTrue\b/g, 'true')
-    .replace(/\bFalse\b/g, 'false');
-
   try {
-    const values = JSON.parse(normalized) as Array<Record<string, unknown>>;
-    return values
+    const parsed = new PythonLiteralParser(raw.trim()).parse();
+    if (!Array.isArray(parsed)) throw new SyntaxError('Expected a list of sources');
+
+    return parsed
       .map((source) => {
-        const id = Number(source.ID ?? source.id);
-        const url = typeof source.channel_url === 'string' ? source.channel_url.trim() : '';
+        if (!source || Array.isArray(source) || typeof source !== 'object') return null;
+        const record = source as { [key: string]: LiteralValue };
+        const id = Number(record.ID ?? record.id);
+        const url = typeof record.channel_url === 'string' ? record.channel_url.trim() : '';
         if (!Number.isInteger(id) || !url) return null;
 
         return {
           id,
           channelId,
-          title: typeof source.title === 'string' ? nullable(source.title) : null,
+          title: typeof record.title === 'string' ? nullable(record.title) : null,
           url,
-          referer: typeof source.channel_referer === 'string' ? nullable(source.channel_referer) : null,
-          origin: typeof source.channel_origin === 'string' ? nullable(source.channel_origin) : null,
-          country: typeof source.country === 'string' ? nullable(source.country) : null,
-          vip: Boolean(source.isvip),
+          referer: typeof record.channel_referer === 'string' ? nullable(record.channel_referer) : null,
+          origin: typeof record.channel_origin === 'string' ? nullable(record.channel_origin) : null,
+          country: typeof record.country === 'string' ? nullable(record.country) : null,
+          vip: record.isvip === true || record.isvip === 1,
         };
       })
       .filter((source): source is NonNullable<typeof source> => source !== null);
