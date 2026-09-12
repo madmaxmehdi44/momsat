@@ -6,6 +6,7 @@ import HomeVisualHardening from '../components/HomeVisualHardening';
 import MomsatAppChrome from '../components/MomsatAppChrome';
 import PersistentPlayerProvider from '../components/PersistentPlayerProvider';
 import BrowsePlayerGuard from '../components/BrowsePlayerGuard';
+import ThemeSync from '../components/ThemeSync';
 
 export const metadata = {
   title: 'MOMSAT — Persian Live TV',
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="fa" dir="rtl">
       <body>
+        <ThemeSync />
         <BrowserCompatibility />
         <HomeVisualHardening />
         <PersistentPlayerProvider>
