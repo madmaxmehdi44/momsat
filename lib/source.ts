@@ -342,14 +342,16 @@ const officialAdapter: CatalogSourceAdapter = {
 export const catalogSourceAdapters: CatalogSourceAdapter[] = [myTvSatAdapter, iranInternationalAdapter, parsaTvAdapter, persianTvLiveAdapter, pakhshZendeAdapter, m3uAdapter, officialAdapter];
 
 export async function fetchCatalogSources(): Promise<CatalogSourceResult[]> {
-  const results: CatalogSourceResult[] = [];
-  for (const adapter of catalogSourceAdapters) {
-    if (!adapter.isEnabled()) { results.push({ adapter: adapter.id, status: 'disabled', channels: [] }); continue; }
-    if (!adapter.isConfigured()) { results.push({ adapter: adapter.id, status: 'unconfigured', channels: [], error: 'Optional source is not configured; source was skipped.' }); continue; }
-    try { results.push({ adapter: adapter.id, status: 'ready', channels: await adapter.fetch() }); }
-    catch (error) { results.push({ adapter: adapter.id, status: 'failed', channels: [], error: error instanceof Error ? error.message : 'source fetch failed' }); }
-  }
-  return results;
+  const tasks = catalogSourceAdapters.map(async (adapter): Promise<CatalogSourceResult> => {
+    if (!adapter.isEnabled()) return { adapter: adapter.id, status: 'disabled', channels: [] };
+    if (!adapter.isConfigured()) return { adapter: adapter.id, status: 'unconfigured', channels: [], error: 'Optional source is not configured; source was skipped.' };
+    try {
+      return { adapter: adapter.id, status: 'ready', channels: await adapter.fetch() };
+    } catch (error) {
+      return { adapter: adapter.id, status: 'failed', channels: [], error: error instanceof Error ? error.message : 'source fetch failed' };
+    }
+  });
+  return Promise.all(tasks);
 }
 
 export async function fetchCatalog(): Promise<Channel[]> {
@@ -358,5 +360,5 @@ export async function fetchCatalog(): Promise<Channel[]> {
 }
 
 export function categoriesOf(channels: Channel[]) {
-  return Array.from(new Map(channels.map((channel) => [channel.catId, { id: channel.catId, name: channel.category, nameEn: channel.categoryEn }])).values()).filter((category) => category.id !== 0);
+  return Array.from(new Map(channels.map((channel) => [channel.catId, { id: channel.catId, name: channel.category, nameEn: channel.categoryEn }])).values());
 }
