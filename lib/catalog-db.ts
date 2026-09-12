@@ -1,8 +1,8 @@
 import { prisma } from './prisma';
-import { fetchCatalog, categoriesOf, Channel } from './source';
+import { categoriesOf, Channel } from './source';
 import { ensureChannelThumbnail } from './channel-thumbnail';
 import { fallbackChannelThumbnail } from './fallback-thumbnail';
-import { ttlDelete, ttlGet, ttlGetOrSet, ttlSet } from './ttl-cache';
+import { ttlDelete, ttlGet, ttlGetOrSet, ttlGetStale, ttlSet } from './ttl-cache';
 import { rankCatalogChannels } from './catalog-ranking';
 import { mergeFeaturedChannels } from './featured-channels';
 import { applyStreamHealth } from './stream-health';
@@ -27,8 +27,8 @@ const DB_CATALOG_TIMEOUT_MS = Math.max(750, Number(process.env.CATALOG_DB_TIMEOU
 const DB_FAILURE_BACKOFF_MS = Math.max(5_000, Number(process.env.CATALOG_DB_FAILURE_BACKOFF_MS || 30_000));
 const SOURCE_FALLBACK_CACHE_TTL_MS = Math.max(60_000, Number(process.env.CATALOG_SOURCE_FALLBACK_TTL_MS || 600_000));
 
-export const CATALOG_CACHE_KEY = 'momsat:catalog:v10:bounded-db-and-health-reads';
-const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:source-fallback-v3`;
+export const CATALOG_CACHE_KEY = 'momsat:catalog:v11:database-only-stale-safe';
+const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:database-stale-v1`;
 
 let dbBackoffUntil = 0;
 
@@ -89,21 +89,12 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
     return result;
   } catch (error) {
     dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
-    console.warn(`[catalog-db] Database unavailable; serving warm fallback for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
+    console.warn(`[catalog-db] Database unavailable; serving stale catalog for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
     return null;
   }
 }
 
 const catalogTtlMs = () => Math.max(30_000, Number(process.env.CATALOG_CACHE_TTL_MS || 300_000));
-
-async function loadSourceFallbackCatalog() {
-  const cached = ttlGet<Channel[]>(SOURCE_FALLBACK_CACHE_KEY);
-  if (cached && cached.length > 0) return cached;
-
-  const loaded = normalizeCatalog(await fetchCatalog(), false);
-  ttlSet(SOURCE_FALLBACK_CACHE_KEY, loaded, SOURCE_FALLBACK_CACHE_TTL_MS);
-  return loaded;
-}
 
 async function loadCatalog(): Promise<Channel[]> {
   const databaseCatalog = await fetchCatalogFromDb();
@@ -115,7 +106,13 @@ async function loadCatalog(): Promise<Channel[]> {
   const warmFallback = ttlGet<Channel[]>(SOURCE_FALLBACK_CACHE_KEY);
   if (warmFallback && warmFallback.length > 0) return warmFallback;
 
-  return loadSourceFallbackCatalog();
+  const staleCatalog = ttlGetStale<Channel[]>(SOURCE_FALLBACK_CACHE_KEY);
+  if (staleCatalog && staleCatalog.length > 0) return staleCatalog;
+
+  const stalePrimary = ttlGetStale<Channel[]>(CATALOG_CACHE_KEY);
+  if (stalePrimary && stalePrimary.length > 0) return stalePrimary;
+
+  return [];
 }
 
 export async function getCatalog() {
@@ -123,12 +120,15 @@ export async function getCatalog() {
 }
 
 /**
- * Fast DB-only catalog used by interactive discovery.
- * Never falls back to public-source scraping/discovery.
+ * Interactive discovery is database-only. It can use stale database-derived data,
+ * but it must never trigger public-source discovery during a user request.
  */
 export async function getDatabaseCatalog() {
   const warmCatalog = ttlGet<Channel[]>(CATALOG_CACHE_KEY);
   if (warmCatalog && warmCatalog.length > 0) return warmCatalog;
+
+  const staleCatalog = ttlGetStale<Channel[]>(CATALOG_CACHE_KEY);
+  if (staleCatalog && staleCatalog.length > 0) return staleCatalog;
 
   const databaseCatalog = await fetchCatalogFromDb();
   return databaseCatalog ?? [];
