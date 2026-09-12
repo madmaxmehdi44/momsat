@@ -41,8 +41,8 @@ export default function DiscoveryShell({ channels }: Props) {
 
   const openChannel = (channel: Channel) => {
     play({
-      channelId: channel.id,
-      channelName: channel.name,
+      id: channel.id,
+      name: channel.name,
       url: channel.url,
       referer: channel.referer,
       origin: channel.origin,
