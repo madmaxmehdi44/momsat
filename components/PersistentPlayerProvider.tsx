@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePathname } from 'next/navigation';
 import PlayerProEnhanced from './PlayerProEnhanced';
@@ -13,6 +13,7 @@ export type PersistentChannel = { id?: number; channelId?: number; name?: string
 type PlayerHostRect = { top: number; left: number; width: number; height: number };
 type CatalogResponse = { channels?: PersistentChannel[] };
 type MiniPosition = { left: number; top: number };
+type PlaybackFailureDetail = { channelId: number; url: string; reason?: string };
 
 type PersistentPlayerContextValue = {
   activeChannel: PersistentChannel | null;
@@ -67,6 +68,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const [miniPosition, setMiniPosition] = useState<MiniPosition | null>(null);
   const [dragging, setDragging] = useState(false);
   const catalogPromiseRef = useRef<Promise<PersistentChannel[]> | null>(null);
+  const failoverHistoryRef = useRef<Map<number, Set<string>>>(new Map());
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const expanded = isCurrentWatchRoute(pathname, activeChannel);
 
@@ -95,8 +97,17 @@ export default function PersistentPlayerProvider({ children }: { children: React
 
   const setActiveChannel = useCallback((channel: PersistentChannel) => {
     setCollapsed(false);
+    const nextId = persistentChannelId(channel);
+    const currentId = persistentChannelId(activeChannelRef.current);
+    if (nextId != null && nextId !== currentId) failoverHistoryRef.current.delete(nextId);
     setActiveChannelState((current) => current && channelKey(current) === channelKey(channel) ? current : channel);
   }, []);
+  const activeChannelRef = useRef<PersistentChannel | null>(null);
+
+  useEffect(() => {
+    activeChannelRef.current = activeChannel;
+  }, [activeChannel]);
+
   const play = useCallback((channel: PersistentChannel) => setActiveChannel(channel), [setActiveChannel]);
   const stopPlayer = useCallback(() => { setCollapsed(true); try { sessionStorage.removeItem(STORAGE_KEY); } catch {} }, []);
   const registerPlayerHost = useCallback((element: HTMLElement | null) => setPlayerHost((current) => current === element ? current : element), []);
@@ -111,6 +122,44 @@ export default function PersistentPlayerProvider({ children }: { children: React
     }
     return catalogPromiseRef.current;
   }, []);
+
+  useEffect(() => {
+    const onPlaybackFailure = (event: Event) => {
+      const detail = (event as CustomEvent<PlaybackFailureDetail>).detail;
+      const current = activeChannelRef.current;
+      if (!detail || !current) return;
+      const channelId = persistentChannelId(current);
+      if (channelId == null || channelId !== detail.channelId) return;
+
+      const allSources = Array.from(new Map((current.sources ?? []).filter((source) => source.url?.trim()).map((source) => [source.url.trim(), source])).values());
+      if (!allSources.length) return;
+      const failedUrl = detail.url.trim();
+      const history = failoverHistoryRef.current.get(channelId) ?? new Set<string>();
+      history.add(failedUrl);
+      failoverHistoryRef.current.set(channelId, history);
+
+      const currentIndex = allSources.findIndex((source) => source.url.trim() === failedUrl);
+      const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+      const next = [...allSources.slice(startIndex), ...allSources.slice(0, startIndex)].find((source) => !history.has(source.url.trim()));
+      if (!next) return;
+
+      setErrorForFailover(next.title || 'مسیر جایگزین');
+      setActiveChannel({
+        ...current,
+        url: next.url,
+        referer: next.referer ?? null,
+        origin: next.origin ?? null,
+        sources: [next, ...allSources.filter((source) => source.url.trim() !== next.url.trim())],
+      });
+    };
+
+    const setErrorForFailover = (label: string) => {
+      void label;
+    };
+
+    window.addEventListener('momsat:playback-failure', onPlaybackFailure as EventListener);
+    return () => window.removeEventListener('momsat:playback-failure', onPlaybackFailure as EventListener);
+  }, [setActiveChannel]);
 
   useEffect(() => {
     const onChannelLinkClick = (event: MouseEvent) => {
