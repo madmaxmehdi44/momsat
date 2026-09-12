@@ -99,7 +99,7 @@ export default function SmartPlayer({ channel }: { channel: Channel }) {
   useEffect(() => {
     if (!allSources.length) return;
     const normalizedPath = (pathname || '').replace(/\/+$/, '');
-    const currentChannelIsExplicitTarget = channel.id != null && normalizedPath === `/channel/${channel.id}`;
+    const currentChannelIsExplicitTarget = channel.id != null && (normalizedPath === `/channel/${channel.id}` || normalizedPath === '/watch');
     const activeIsDifferent = activeChannel?.id != null && channel.id != null && activeChannel.id !== channel.id;
     if (activeIsDifferent && !currentChannelIsExplicitTarget) return;
     const orderedSources = [...verified, ...allSources.filter((source) => !verified.some((item) => item.url === source.url))];
