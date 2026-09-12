@@ -18,6 +18,7 @@ type PersistentPlayerContextValue = {
   activeChannel: PersistentChannel | null;
   expanded: boolean;
   setActiveChannel: (channel: PersistentChannel) => void;
+  play: (channel: PersistentChannel) => void;
   stopPlayer: () => void;
   registerPlayerHost: (element: HTMLElement | null) => void;
 };
@@ -114,6 +115,10 @@ export default function PersistentPlayerProvider({ children }: { children: React
       return channel;
     });
   }, []);
+
+  const play = useCallback((channel: PersistentChannel) => {
+    setActiveChannel(channel);
+  }, [setActiveChannel]);
 
   const stopPlayer = useCallback(() => {
     setCollapsed(true);
@@ -219,7 +224,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
     try { event.currentTarget.releasePointerCapture?.(event.pointerId); } catch {}
   }, []);
 
-  const value = useMemo(() => ({ activeChannel, expanded, setActiveChannel, stopPlayer, registerPlayerHost }), [activeChannel, expanded, setActiveChannel, stopPlayer, registerPlayerHost]);
+  const value = useMemo(() => ({ activeChannel, expanded, setActiveChannel, play, stopPlayer, registerPlayerHost }), [activeChannel, expanded, setActiveChannel, play, stopPlayer, registerPlayerHost]);
   const portalTarget = typeof document !== 'undefined' ? document.body : null;
   const canRenderPlayer = Boolean(activeChannel && !collapsed && portalTarget && (!expanded || hostRect));
   const player = canRenderPlayer ? createPortal(
