@@ -9,6 +9,9 @@
   --momsat-accent: var(--accent);
   --momsat-accent-2: var(--accent2);
   --red: var(--accent);
+  --momsat-success: #39d98a;
+  --momsat-warning: #f0b44d;
+  --momsat-danger: #ff5b72;
   color-scheme: dark;
 }
 
@@ -16,42 +19,25 @@
 :root[data-momsat-theme='midnight'],
 :root[data-momsat-theme='aurora'] { color-scheme: dark; }
 
-html, body {
-  background: var(--bg) !important;
-  color: var(--text) !important;
-}
-
-body {
-  background-image: radial-gradient(circle at 80% -10%, color-mix(in srgb, var(--accent2) 12%, transparent), transparent 35%) !important;
-}
-
+html, body { background: var(--bg) !important; color: var(--text) !important; }
+body { background-image: radial-gradient(circle at 80% -10%, color-mix(in srgb, var(--accent2) 12%, transparent), transparent 35%) !important; }
 a { color: inherit; }
-
 input, select, textarea, button { font: inherit; }
+input, select, textarea { color: var(--text) !important; background-color: var(--panel) !important; border-color: var(--line) !important; }
+input::placeholder, textarea::placeholder { color: var(--muted) !important; }
+:where(button, a, input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-input, select, textarea {
-  color: var(--text);
-  background-color: var(--panel);
-  border-color: var(--line);
-}
+:where([role='dialog'], dialog, [aria-modal='true']) { color: var(--text) !important; background: var(--panel) !important; border-color: var(--line) !important; }
+:where(table) { color: var(--text); border-color: var(--line) !important; }
+:where(th) { color: var(--muted); background: var(--panel-2) !important; border-color: var(--line) !important; }
+:where(td) { color: var(--text); border-color: var(--line) !important; }
+:where(option) { color: var(--text); background: var(--panel); }
 
-input::placeholder, textarea::placeholder { color: var(--muted); }
-
-:where(button, a, input, select, textarea):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Legacy/global class bridge. These selectors intentionally use the shared tokens. */
 nav { color: var(--muted) !important; }
 .hero p, .detail-copy h3 { color: var(--muted) !important; }
 .btn { background: var(--panel) !important; color: var(--text) !important; border-color: var(--line) !important; }
 .btn.primary { background: linear-gradient(135deg, var(--accent2), var(--accent)) !important; color: var(--bg) !important; }
-.card, .detail-grid > div, .kpi, .status, .notice, .guide-row, .program {
-  background: var(--panel) !important;
-  border-color: var(--line) !important;
-  color: var(--text);
-}
+.card, .detail-grid > div, .kpi, .status, .notice, .guide-row, .program { background: var(--panel) !important; border-color: var(--line) !important; color: var(--text); }
 .card { background: linear-gradient(180deg, var(--panel), color-mix(in srgb, var(--panel) 78%, var(--bg))) !important; }
 .thumb { background: linear-gradient(135deg, color-mix(in srgb, var(--accent2) 12%, var(--panel)), var(--bg)) !important; }
 .fallback { color: color-mix(in srgb, var(--muted) 70%, var(--text)) !important; }
@@ -62,43 +48,41 @@ nav { color: var(--muted) !important; }
 .admin-table th { background: var(--panel-2) !important; color: var(--muted) !important; }
 .admin-table td { color: var(--text) !important; }
 
-/* Discovery/Home shell */
-[class*="YouTubeBrowseShellV2_shell"] { background: var(--momsat-bg) !important; color: var(--momsat-text) !important; }
-[class*="YouTubeBrowseShellV2_header"],
-[class*="YouTubeBrowseShellV2_sidebar"],
-[class*="YouTubeBrowseShellV2_categoryBar"] { background-color: var(--momsat-bg) !important; border-color: var(--momsat-line) !important; }
-[class*="YouTubeBrowseShellV2_search"],
-[class*="YouTubeBrowseShellV2_hero"],
-[class*="YouTubeBrowseShellV2_empty"],
-[class*="YouTubeBrowseShellV2_thumb"] { background-color: var(--momsat-panel) !important; border-color: var(--momsat-line) !important; }
-[class*="YouTubeBrowseShellV2_search"] { color: var(--momsat-muted) !important; }
-[class*="YouTubeBrowseShellV2_search"] input,
-[class*="YouTubeBrowseShellV2_cardTitle"],
-[class*="YouTubeBrowseShellV2_hero"] h1,
-[class*="YouTubeBrowseShellV2_hero"] p,
-[class*="YouTubeBrowseShellV2_railHeader"] h2,
-[class*="YouTubeBrowseShellV2_gridHeading"] h2 { color: var(--momsat-text) !important; }
-[class*="YouTubeBrowseShellV2_search"] input::placeholder,
-[class*="YouTubeBrowseShellV2_cardMeta"],
-[class*="YouTubeBrowseShellV2_cardSub"],
-[class*="YouTubeBrowseShellV2_railHeader"] p,
-[class*="YouTubeBrowseShellV2_gridHeading"] p { color: var(--momsat-muted) !important; }
-[class*="YouTubeBrowseShellV2_navItem"],
-[class*="YouTubeBrowseShellV2_categoryChip"],
-[class*="YouTubeBrowseShellV2_railActions"] button,
-[class*="YouTubeBrowseShellV2_gridHeading"] button { color: var(--momsat-text) !important; border-color: var(--momsat-line) !important; background-color: var(--momsat-panel-2) !important; }
-[class*="YouTubeBrowseShellV2_navActive"],
-[class*="YouTubeBrowseShellV2_categorySelected"] { background: var(--momsat-text) !important; color: var(--momsat-bg) !important; border-color: var(--momsat-text) !important; }
-[class*="YouTubeBrowseShellV2_categorySelected"] em { background: var(--momsat-panel-2) !important; color: var(--momsat-text) !important; }
-[class*="YouTubeBrowseShellV2_live"],
-[class*="YouTubeBrowseShellV2_heroEyebrow"] i { background-color: var(--momsat-accent) !important; }
-[class*="YouTubeBrowseShellV2_logo"] span,
-[class*="YouTubeBrowseShellV2_navActive"] svg { color: var(--momsat-accent) !important; }
-[class*="YouTubeBrowseShellV2_hero"] { box-shadow: 0 14px 40px color-mix(in srgb, var(--momsat-bg) 65%, transparent) !important; }
+[class*='YouTubeBrowseShellV2_shell'] { background: var(--momsat-bg) !important; color: var(--momsat-text) !important; }
+[class*='YouTubeBrowseShellV2_header'],
+[class*='YouTubeBrowseShellV2_sidebar'],
+[class*='YouTubeBrowseShellV2_categoryBar'] { background-color: var(--momsat-bg) !important; border-color: var(--momsat-line) !important; }
+[class*='YouTubeBrowseShellV2_search'],
+[class*='YouTubeBrowseShellV2_hero'],
+[class*='YouTubeBrowseShellV2_empty'],
+[class*='YouTubeBrowseShellV2_thumb'] { background-color: var(--momsat-panel) !important; border-color: var(--momsat-line) !important; }
+[class*='YouTubeBrowseShellV2_search'] { color: var(--momsat-muted) !important; }
+[class*='YouTubeBrowseShellV2_search'] input,
+[class*='YouTubeBrowseShellV2_cardTitle'],
+[class*='YouTubeBrowseShellV2_hero'] h1,
+[class*='YouTubeBrowseShellV2_hero'] p,
+[class*='YouTubeBrowseShellV2_railHeader'] h2,
+[class*='YouTubeBrowseShellV2_gridHeading'] h2 { color: var(--momsat-text) !important; }
+[class*='YouTubeBrowseShellV2_search'] input::placeholder,
+[class*='YouTubeBrowseShellV2_cardMeta'],
+[class*='YouTubeBrowseShellV2_cardSub'],
+[class*='YouTubeBrowseShellV2_railHeader'] p,
+[class*='YouTubeBrowseShellV2_gridHeading'] p { color: var(--momsat-muted) !important; }
+[class*='YouTubeBrowseShellV2_navItem'],
+[class*='YouTubeBrowseShellV2_categoryChip'],
+[class*='YouTubeBrowseShellV2_railActions'] button,
+[class*='YouTubeBrowseShellV2_gridHeading'] button { color: var(--momsat-text) !important; border-color: var(--momsat-line) !important; background-color: var(--momsat-panel-2) !important; }
+[class*='YouTubeBrowseShellV2_navActive'],
+[class*='YouTubeBrowseShellV2_categorySelected'] { background: var(--momsat-text) !important; color: var(--momsat-bg) !important; border-color: var(--momsat-text) !important; }
+[class*='YouTubeBrowseShellV2_categorySelected'] em { background: var(--momsat-panel-2) !important; color: var(--momsat-text) !important; }
+[class*='YouTubeBrowseShellV2_live'],
+[class*='YouTubeBrowseShellV2_heroEyebrow'] i { background-color: var(--momsat-accent) !important; }
+[class*='YouTubeBrowseShellV2_logo'] span,
+[class*='YouTubeBrowseShellV2_navActive'] svg { color: var(--momsat-accent) !important; }
+[class*='YouTubeBrowseShellV2_hero'] { box-shadow: 0 14px 40px color-mix(in srgb, var(--momsat-bg) 65%, transparent) !important; }
 
-/* Player chrome: selected theme controls every player surface and accent. */
 .pro-player-live { background: color-mix(in srgb, var(--accent) 88%, var(--accent2)) !important; }
-.icon-button, .text-button { color: var(--text) !important; background: color-mix(in srgb, var(--panel) 78%, transparent) !important; }
+.icon-button, .text-button { color: var(--text) !important; background: color-mix(in srgb, var(--panel) 78%, transparent) !important; border-color: var(--line) !important; }
 .icon-button:hover, .text-button:hover { background: color-mix(in srgb, var(--accent) 20%, var(--panel)) !important; color: var(--accent) !important; }
 .player-pro-shell { background: var(--bg) !important; }
 .player-pro-status, .player-pro-icon, .player-pro-chip { color: var(--text) !important; border-color: color-mix(in srgb, var(--line) 80%, transparent) !important; background: color-mix(in srgb, var(--panel) 72%, transparent) !important; }
@@ -110,11 +94,23 @@ nav { color: var(--muted) !important; }
 .player-pro-metric { border-color: var(--line) !important; }
 .player-pro-metric > svg, .player-pro-live-readout strong { color: var(--accent) !important; }
 
-/* Admin route: consume global tokens even where legacy inline styles remain. */
-[data-momsat-admin] { background: var(--bg) !important; color: var(--text) !important; }
-[data-momsat-admin] > div > div { background: var(--panel) !important; border-color: var(--line) !important; }
-[data-momsat-admin] input, [data-momsat-admin] select, [data-momsat-admin] textarea { background: var(--panel) !important; color: var(--text) !important; border-color: var(--line) !important; }
-[data-momsat-admin] button { border-color: var(--line) !important; }
+/* Admin route: inline legacy surfaces inherit the active MOMSAT theme. */
+main[style] { background: var(--bg) !important; color: var(--text) !important; }
+main[style] > div { color: var(--text); }
+main[style] input, main[style] select, main[style] textarea { background: var(--panel) !important; color: var(--text) !important; border-color: var(--line) !important; }
+main[style] button { color: var(--text) !important; border-color: var(--line) !important; }
+main[style] button:hover { background: color-mix(in srgb, var(--accent) 14%, var(--panel)) !important; color: var(--accent) !important; }
+main[style] table { background: var(--panel) !important; color: var(--text) !important; border-color: var(--line) !important; }
+main[style] th { background: var(--panel-2) !important; color: var(--muted) !important; border-color: var(--line) !important; }
+main[style] td { color: var(--text) !important; border-color: var(--line) !important; }
+main[style] [style*='border'] { border-color: var(--line) !important; }
+
+/* State surfaces used by legacy pages. */
+[aria-busy='true'] { background: var(--bg) !important; color: var(--muted) !important; }
+[role='alert'], [data-error] { color: var(--text); border-color: var(--line); }
+.status[data-state='success'], [data-state='success'] { color: var(--momsat-success); }
+.status[data-state='warning'], [data-state='warning'] { color: var(--momsat-warning); }
+.status[data-state='error'], [data-state='error'] { color: var(--momsat-danger); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
