@@ -24,6 +24,14 @@ export function ttlGet<T>(key: string): T | undefined {
   return entry.value;
 }
 
+/**
+ * Returns the last cached value even when its TTL has expired.
+ * This is intentionally non-destructive and is used for stale-while-revalidate paths.
+ */
+export function ttlGetStale<T>(key: string): T | undefined {
+  return (cache.get(key) as Entry<T> | undefined)?.value;
+}
+
 export function ttlSet<T>(key: string, value: T, ttlMs: number): T {
   const now = Date.now();
   prune(now);
