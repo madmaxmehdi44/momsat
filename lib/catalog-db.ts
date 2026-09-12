@@ -2,7 +2,7 @@ import { prisma } from './prisma';
 import { fetchCatalog, categoriesOf, Channel } from './source';
 import { ensureChannelThumbnail } from './channel-thumbnail';
 import { fallbackChannelThumbnail } from './fallback-thumbnail';
-import { ttlDelete, ttlGetOrSet } from './ttl-cache';
+import { ttlDelete, ttlGet, ttlGetOrSet, ttlSet } from './ttl-cache';
 import { rankCatalogChannels } from './catalog-ranking';
 import { mergeFeaturedChannels } from './featured-channels';
 import { applyStreamHealth } from './stream-health';
@@ -22,11 +22,13 @@ type DbChannel = Awaited<ReturnType<typeof prisma.channel.findMany>>[number] & {
   sources: Array<{ id: number; title: string | null; url: string; referer: string | null; origin: string | null; country: string | null; vip: boolean }>;
 };
 
-const DB_CATALOG_TIMEOUT_MS = Math.max(700, Number(process.env.CATALOG_DB_TIMEOUT_MS || 1200));
+const DB_CATALOG_TIMEOUT_MS = Math.max(1500, Number(process.env.CATALOG_DB_TIMEOUT_MS || 3000));
 const DB_FAILURE_BACKOFF_MS = Math.max(5_000, Number(process.env.CATALOG_DB_FAILURE_BACKOFF_MS || 30_000));
 const STREAM_HEALTH_TIMEOUT_MS = 700;
+const SOURCE_FALLBACK_CACHE_TTL_MS = Math.max(60_000, Number(process.env.CATALOG_SOURCE_FALLBACK_TTL_MS || 600_000));
 
 export const CATALOG_CACHE_KEY = 'momsat:catalog:v8:database-first-health-ranked-reliable-thumbnails-with-db-backoff';
+const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:source-fallback-v1`;
 
 let dbBackoffUntil = 0;
 
@@ -102,24 +104,40 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
     const result = await Promise.race([databaseLoad, timeout]);
     if (result === null) {
       dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
-      console.warn(`[catalog-db] Database catalog timed out after ${DB_CATALOG_TIMEOUT_MS}ms; using configured catalog sources for ${DB_FAILURE_BACKOFF_MS}ms.`);
+      console.warn(`[catalog-db] Database catalog timed out after ${DB_CATALOG_TIMEOUT_MS}ms; serving warm fallback catalog while DB is cooling down for ${DB_FAILURE_BACKOFF_MS}ms.`);
       return null;
     }
     dbBackoffUntil = 0;
     return result;
   } catch (error) {
     dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
-    console.warn(`[catalog-db] Database unavailable; using configured catalog sources for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
+    console.warn(`[catalog-db] Database unavailable; serving warm fallback catalog for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
     return null;
   }
 }
 
-const catalogTtlMs = () => Math.max(10_000, Number(process.env.CATALOG_CACHE_TTL_MS || 60_000));
+const catalogTtlMs = () => Math.max(30_000, Number(process.env.CATALOG_CACHE_TTL_MS || 300_000));
+
+async function loadSourceFallbackCatalog() {
+  const cached = ttlGet<Channel[]>(SOURCE_FALLBACK_CACHE_KEY);
+  if (cached && cached.length > 0) return cached;
+
+  const loaded = normalizeCatalog(await fetchCatalog());
+  ttlSet(SOURCE_FALLBACK_CACHE_KEY, loaded, SOURCE_FALLBACK_CACHE_TTL_MS);
+  return loaded;
+}
 
 async function loadCatalog(): Promise<Channel[]> {
   const databaseCatalog = await fetchCatalogFromDb();
-  if (databaseCatalog && databaseCatalog.length > 0) return databaseCatalog;
-  return normalizeCatalog(await fetchCatalog());
+  if (databaseCatalog && databaseCatalog.length > 0) {
+    ttlSet(SOURCE_FALLBACK_CACHE_KEY, databaseCatalog, SOURCE_FALLBACK_CACHE_TTL_MS);
+    return databaseCatalog;
+  }
+
+  const warmFallback = ttlGet<Channel[]>(SOURCE_FALLBACK_CACHE_KEY);
+  if (warmFallback && warmFallback.length > 0) return warmFallback;
+
+  return loadSourceFallbackCatalog();
 }
 
 export async function getCatalog() {
@@ -128,6 +146,7 @@ export async function getCatalog() {
 
 export function invalidateCatalogCache() {
   ttlDelete(CATALOG_CACHE_KEY);
+  ttlDelete(SOURCE_FALLBACK_CACHE_KEY);
 }
 
 export function getCategories(channels: Channel[]) {
