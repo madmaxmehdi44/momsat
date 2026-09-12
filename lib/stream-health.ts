@@ -23,6 +23,9 @@ type HealthRecord = {
 
 const BROKEN_STREAK = 3;
 const MAX_ERROR_LENGTH = 500;
+const channelExistenceCache = new Map<number, { exists: boolean; expiresAt: number }>();
+const CHANNEL_EXISTS_TTL_MS = 5 * 60_000;
+const CHANNEL_MISSING_TTL_MS = 30_000;
 
 function normalizeUrl(url: string) {
   return url.trim();
@@ -35,6 +38,22 @@ function safeError(error: unknown) {
 
 function now() {
   return new Date();
+}
+
+async function persistedChannelExists(channelId: number) {
+  if (!process.env.DATABASE_URL?.trim() || !Number.isInteger(channelId) || channelId <= 0) return false;
+  const cached = channelExistenceCache.get(channelId);
+  if (cached && cached.expiresAt > Date.now()) return cached.exists;
+
+  try {
+    const row = await prisma.channel.findUnique({ where: { id: channelId }, select: { id: true } });
+    const exists = Boolean(row);
+    channelExistenceCache.set(channelId, { exists, expiresAt: Date.now() + (exists ? CHANNEL_EXISTS_TTL_MS : CHANNEL_MISSING_TTL_MS) });
+    return exists;
+  } catch (error) {
+    console.warn('[stream-health] Failed to verify channel before health write.', error);
+    return false;
+  }
 }
 
 export function streamHealthScore(record: HealthRecord | undefined) {
@@ -125,6 +144,7 @@ export async function reportStreamSuccess(input: {
   latencyMs?: number | null;
 }) {
   if (!process.env.DATABASE_URL?.trim() || !input.channelId || !normalizeUrl(input.url)) return;
+  if (!(await persistedChannelExists(input.channelId))) return;
 
   const url = normalizeUrl(input.url);
   const checkedAt = now();
@@ -182,6 +202,7 @@ export async function reportStreamFailure(input: {
   latencyMs?: number | null;
 }) {
   if (!process.env.DATABASE_URL?.trim() || !input.channelId || !normalizeUrl(input.url)) return;
+  if (!(await persistedChannelExists(input.channelId))) return;
 
   const url = normalizeUrl(input.url);
   const checkedAt = now();
@@ -253,6 +274,7 @@ export async function updateStreamHealth(input: {
   reason?: string | null;
 }) {
   if (!process.env.DATABASE_URL?.trim()) throw new Error('DATABASE_URL is not configured');
+  if (!(await persistedChannelExists(input.channelId))) throw new Error('Channel does not exist in the database');
 
   const url = normalizeUrl(input.url);
   const targetUrl = normalizeUrl(input.newUrl ?? '');
