@@ -47,10 +47,10 @@ function channelKey(channel: PersistentChannel) {
   });
 }
 
-function isCurrentChannelPage(pathname: string | null, channel: PersistentChannel | null) {
+function isCurrentWatchRoute(pathname: string | null, channel: PersistentChannel | null) {
   if (!pathname || channel?.id == null) return false;
   const normalized = pathname.replace(/\/+$/, '');
-  return normalized === `/channel/${channel.id}`;
+  return normalized === `/channel/${channel.id}` || normalized === '/watch';
 }
 
 function clampMiniPosition(position: MiniPosition, width = MINI_WIDTH, height = 244) {
@@ -80,7 +80,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const catalogPromiseRef = useRef<Promise<PersistentChannel[]> | null>(null);
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
 
-  const expanded = isCurrentChannelPage(pathname, activeChannel);
+  const expanded = isCurrentWatchRoute(pathname, activeChannel);
 
   useEffect(() => {
     try {
@@ -99,10 +99,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
       setMiniPosition((current) => {
         if (current) return clampMiniPosition(current);
         if (typeof window === 'undefined') return current;
-        return clampMiniPosition({
-          left: window.innerWidth - MINI_WIDTH - MINI_GAP,
-          top: window.innerHeight - 244 - MINI_GAP,
-        });
+        return clampMiniPosition({ left: window.innerWidth - MINI_WIDTH - MINI_GAP, top: window.innerHeight - 244 - MINI_GAP });
       });
     };
     ensurePosition();
@@ -135,9 +132,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
           const body = await response.json() as CatalogResponse;
           return Array.isArray(body.channels) ? body.channels : [];
         })
-        .finally(() => {
-          catalogPromiseRef.current = null;
-        });
+        .finally(() => { catalogPromiseRef.current = null; });
     }
     return catalogPromiseRef.current;
   }, []);
@@ -146,24 +141,20 @@ export default function PersistentPlayerProvider({ children }: { children: React
     const onChannelLinkClick = (event: MouseEvent) => {
       if (!activeChannel || collapsed) return;
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-
       const target = event.target instanceof Element ? event.target.closest('a[href]') as HTMLAnchorElement | null : null;
       if (!target) return;
       const href = target.getAttribute('href') || '';
-      const match = href.match(/^\/channel\/(\d+)\/?(?:\?.*)?$/);
-      if (!match) return;
-
+      const watchMatch = href.match(/^\/watch\?v=(\d+)(?:&.*)?$/);
+      if (!watchMatch) return;
       event.preventDefault();
       event.stopPropagation();
-      const channelId = Number(match[1]);
+      const channelId = Number(watchMatch[1]);
       if (!Number.isFinite(channelId)) return;
-
       void loadCatalog().then((channels) => {
         const channel = channels.find((item) => Number(item.id) === channelId);
         if (channel) setActiveChannel(channel);
       }).catch(() => undefined);
     };
-
     document.addEventListener('click', onChannelLinkClick, true);
     return () => document.removeEventListener('click', onChannelLinkClick, true);
   }, [activeChannel, collapsed, loadCatalog, setActiveChannel]);
@@ -173,21 +164,14 @@ export default function PersistentPlayerProvider({ children }: { children: React
       setHostRect(null);
       return;
     }
-
     let frame = 0;
     const update = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const rect = playerHost.getBoundingClientRect();
-        setHostRect({
-          top: rect.top + window.scrollY,
-          left: rect.left + window.scrollX,
-          width: rect.width,
-          height: rect.height,
-        });
+        setHostRect({ top: rect.top + window.scrollY, left: rect.left + window.scrollX, width: rect.width, height: rect.height });
       });
     };
-
     const observer = new ResizeObserver(update);
     observer.observe(playerHost);
     window.addEventListener('resize', update, { passive: true });
@@ -216,11 +200,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
     if (event.button !== 0 && event.pointerType !== 'touch') return;
     const rect = event.currentTarget.parentElement?.getBoundingClientRect();
     if (!rect) return;
-    dragRef.current = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-    };
+    dragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
     setDragging(true);
     event.currentTarget.setPointerCapture?.(event.pointerId);
   }, [expanded, miniPosition]);
@@ -228,11 +208,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const handleMiniPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId || expanded) return;
-    const next = clampMiniPosition({
-      left: event.clientX - drag.offsetX,
-      top: event.clientY - drag.offsetY,
-    });
-    setMiniPosition(next);
+    setMiniPosition(clampMiniPosition({ left: event.clientX - drag.offsetX, top: event.clientY - drag.offsetY }));
   }, [expanded]);
 
   const endMiniDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -243,39 +219,13 @@ export default function PersistentPlayerProvider({ children }: { children: React
     try { event.currentTarget.releasePointerCapture?.(event.pointerId); } catch {}
   }, []);
 
-  const value = useMemo(() => ({
-    activeChannel,
-    expanded,
-    setActiveChannel,
-    stopPlayer,
-    registerPlayerHost,
-  }), [activeChannel, expanded, setActiveChannel, stopPlayer, registerPlayerHost]);
-
+  const value = useMemo(() => ({ activeChannel, expanded, setActiveChannel, stopPlayer, registerPlayerHost }), [activeChannel, expanded, setActiveChannel, stopPlayer, registerPlayerHost]);
   const portalTarget = typeof document !== 'undefined' ? document.body : null;
   const canRenderPlayer = Boolean(activeChannel && !collapsed && portalTarget && (!expanded || hostRect));
   const player = canRenderPlayer ? createPortal(
-    <aside
-      className={`${styles.root} ${expanded ? styles.expanded : styles.mini}`}
-      style={expanded && hostRect ? {
-        top: hostRect.top,
-        left: hostRect.left,
-        width: hostRect.width,
-        height: hostRect.height,
-      } : miniPosition ? {
-        left: miniPosition.left,
-        top: miniPosition.top,
-      } : undefined}
-      aria-label="MOMSAT player"
-    >
+    <aside className={`${styles.root} ${expanded ? styles.expanded : styles.mini}`} style={expanded && hostRect ? { top: hostRect.top, left: hostRect.left, width: hostRect.width, height: hostRect.height } : miniPosition ? { left: miniPosition.left, top: miniPosition.top } : undefined} aria-label="MOMSAT player">
       <div className={styles.inner}>
-        <div
-          className={`${styles.dragHandle} ${dragging ? styles.dragging : ''}`}
-          onPointerDown={handleMiniPointerDown}
-          onPointerMove={handleMiniPointerMove}
-          onPointerUp={endMiniDrag}
-          onPointerCancel={endMiniDrag}
-          role="presentation"
-        />
+        <div className={`${styles.dragHandle} ${dragging ? styles.dragging : ''}`} onPointerDown={handleMiniPointerDown} onPointerMove={handleMiniPointerMove} onPointerUp={endMiniDrag} onPointerCancel={endMiniDrag} role="presentation" />
         <StreamAccelerator urls={(activeChannel?.sources ?? []).map((source) => source.url)} />
         <StreamHealthObserver channel={activeChannel} />
         <PlayerProEnhanced channel={activeChannel!} />
@@ -286,10 +236,5 @@ export default function PersistentPlayerProvider({ children }: { children: React
     portalTarget!,
   ) : null;
 
-  return (
-    <PersistentPlayerContext.Provider value={value}>
-      {children}
-      {player}
-    </PersistentPlayerContext.Provider>
-  );
+  return <PersistentPlayerContext.Provider value={value}>{children}{player}</PersistentPlayerContext.Provider>;
 }
