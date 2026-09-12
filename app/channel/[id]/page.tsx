@@ -1,17 +1,17 @@
 export const dynamic = 'force-dynamic';
 
 import { notFound } from 'next/navigation';
-import { getCatalog } from '../../../lib/catalog-db';
+import { getCatalog, findChannel } from '../../../lib/catalog-db';
 import ChannelProfilePage from '../../../components/ChannelProfilePage';
 
 export default async function ChannelPage({ params }: { params: Promise<{ id: string }> }) {
   const id = Number((await params).id);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const catalog = await getCatalog();
-  const channel = catalog.find((item) => item.id === id) ?? null;
+  const channel = await findChannel(id);
   if (!channel) notFound();
 
+  const catalog = await getCatalog();
   const recommendations = catalog
     .filter((item) => item.id !== channel.id)
     .sort((a, b) => {
