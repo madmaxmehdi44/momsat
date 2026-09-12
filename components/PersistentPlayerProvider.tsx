@@ -69,6 +69,7 @@ export default function PersistentPlayerProvider({ children }: { children: React
   const [dragging, setDragging] = useState(false);
   const catalogPromiseRef = useRef<Promise<PersistentChannel[]> | null>(null);
   const failoverHistoryRef = useRef<Map<number, Set<string>>>(new Map());
+  const activeChannelRef = useRef<PersistentChannel | null>(null);
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const expanded = isCurrentWatchRoute(pathname, activeChannel);
 
@@ -95,6 +96,10 @@ export default function PersistentPlayerProvider({ children }: { children: React
     return () => window.removeEventListener('resize', ensurePosition);
   }, []);
 
+  useEffect(() => {
+    activeChannelRef.current = activeChannel;
+  }, [activeChannel]);
+
   const setActiveChannel = useCallback((channel: PersistentChannel) => {
     setCollapsed(false);
     const nextId = persistentChannelId(channel);
@@ -102,11 +107,6 @@ export default function PersistentPlayerProvider({ children }: { children: React
     if (nextId != null && nextId !== currentId) failoverHistoryRef.current.delete(nextId);
     setActiveChannelState((current) => current && channelKey(current) === channelKey(channel) ? current : channel);
   }, []);
-  const activeChannelRef = useRef<PersistentChannel | null>(null);
-
-  useEffect(() => {
-    activeChannelRef.current = activeChannel;
-  }, [activeChannel]);
 
   const play = useCallback((channel: PersistentChannel) => setActiveChannel(channel), [setActiveChannel]);
   const stopPlayer = useCallback(() => { setCollapsed(true); try { sessionStorage.removeItem(STORAGE_KEY); } catch {} }, []);
@@ -128,11 +128,17 @@ export default function PersistentPlayerProvider({ children }: { children: React
       const detail = (event as CustomEvent<PlaybackFailureDetail>).detail;
       const current = activeChannelRef.current;
       if (!detail || !current) return;
+
       const channelId = persistentChannelId(current);
       if (channelId == null || channelId !== detail.channelId) return;
 
-      const allSources = Array.from(new Map((current.sources ?? []).filter((source) => source.url?.trim()).map((source) => [source.url.trim(), source])).values());
+      const allSources = Array.from(new Map(
+        (current.sources ?? [])
+          .filter((source) => source.url?.trim())
+          .map((source) => [source.url.trim(), source]),
+      ).values());
       if (!allSources.length) return;
+
       const failedUrl = detail.url.trim();
       const history = failoverHistoryRef.current.get(channelId) ?? new Set<string>();
       history.add(failedUrl);
@@ -140,10 +146,10 @@ export default function PersistentPlayerProvider({ children }: { children: React
 
       const currentIndex = allSources.findIndex((source) => source.url.trim() === failedUrl);
       const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
-      const next = [...allSources.slice(startIndex), ...allSources.slice(0, startIndex)].find((source) => !history.has(source.url.trim()));
+      const next = [...allSources.slice(startIndex), ...allSources.slice(0, startIndex)]
+        .find((source) => !history.has(source.url.trim()));
       if (!next) return;
 
-      setErrorForFailover(next.title || 'مسیر جایگزین');
       setActiveChannel({
         ...current,
         url: next.url,
@@ -151,10 +157,6 @@ export default function PersistentPlayerProvider({ children }: { children: React
         origin: next.origin ?? null,
         sources: [next, ...allSources.filter((source) => source.url.trim() !== next.url.trim())],
       });
-    };
-
-    const setErrorForFailover = (label: string) => {
-      void label;
     };
 
     window.addEventListener('momsat:playback-failure', onPlaybackFailure as EventListener);
@@ -170,7 +172,8 @@ export default function PersistentPlayerProvider({ children }: { children: React
       const href = target.getAttribute('href') || '';
       const watchMatch = href.match(/^\/watch\?v=(\d+)(?:&.*)?$/);
       if (!watchMatch) return;
-      event.preventDefault(); event.stopPropagation();
+      event.preventDefault();
+      event.stopPropagation();
       const channelId = Number(watchMatch[1]);
       if (!Number.isFinite(channelId)) return;
       void loadCatalog().then((channels) => {
@@ -185,7 +188,13 @@ export default function PersistentPlayerProvider({ children }: { children: React
   useEffect(() => {
     if (!expanded || !playerHost) { setHostRect(null); return; }
     let frame = 0;
-    const update = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { const rect = playerHost.getBoundingClientRect(); setHostRect({ top: rect.top + window.scrollY, left: rect.left + window.scrollX, width: rect.width, height: rect.height }); }); };
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rect = playerHost.getBoundingClientRect();
+        setHostRect({ top: rect.top + window.scrollY, left: rect.left + window.scrollX, width: rect.width, height: rect.height });
+      });
+    };
     const observer = new ResizeObserver(update);
     observer.observe(playerHost);
     window.addEventListener('resize', update, { passive: true });
@@ -201,10 +210,24 @@ export default function PersistentPlayerProvider({ children }: { children: React
     if (expanded || !miniPosition) return;
     if (event.button !== 0 && event.pointerType !== 'touch') return;
     const rect = event.currentTarget.parentElement?.getBoundingClientRect(); if (!rect) return;
-    dragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }; setDragging(true); event.currentTarget.setPointerCapture?.(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    setDragging(true);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
   }, [expanded, miniPosition]);
-  const handleMiniPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => { const drag = dragRef.current; if (!drag || drag.pointerId !== event.pointerId || expanded) return; setMiniPosition(clampMiniPosition({ left: event.clientX - drag.offsetX, top: event.clientY - drag.offsetY })); }, [expanded]);
-  const endMiniDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => { const drag = dragRef.current; if (!drag || drag.pointerId !== event.pointerId) return; dragRef.current = null; setDragging(false); try { event.currentTarget.releasePointerCapture?.(event.pointerId); } catch {} }, []);
+
+  const handleMiniPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || expanded) return;
+    setMiniPosition(clampMiniPosition({ left: event.clientX - drag.offsetX, top: event.clientY - drag.offsetY }));
+  }, [expanded]);
+
+  const endMiniDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setDragging(false);
+    try { event.currentTarget.releasePointerCapture?.(event.pointerId); } catch {}
+  }, []);
 
   const value = useMemo(() => ({ activeChannel, expanded, setActiveChannel, play, stopPlayer, registerPlayerHost }), [activeChannel, expanded, setActiveChannel, play, stopPlayer, registerPlayerHost]);
   const portalTarget = typeof document !== 'undefined' ? document.body : null;
