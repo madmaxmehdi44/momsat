@@ -7,6 +7,7 @@ import { rankCatalogChannels } from './catalog-ranking';
 import { mergeFeaturedChannels } from './featured-channels';
 import { applyStreamHealth } from './stream-health';
 import { withDbReadTimeout } from './db-timeout';
+import { loadVerifiedCatalog } from './verified-catalog';
 
 export type { Channel };
 
@@ -27,8 +28,8 @@ const DB_CATALOG_TIMEOUT_MS = Math.max(750, Number(process.env.CATALOG_DB_TIMEOU
 const DB_FAILURE_BACKOFF_MS = Math.max(5_000, Number(process.env.CATALOG_DB_FAILURE_BACKOFF_MS || 30_000));
 const SOURCE_FALLBACK_CACHE_TTL_MS = Math.max(60_000, Number(process.env.CATALOG_SOURCE_FALLBACK_TTL_MS || 600_000));
 
-export const CATALOG_CACHE_KEY = 'momsat:catalog:v11:database-only-stale-safe';
-const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:database-stale-v1`;
+export const CATALOG_CACHE_KEY = 'momsat:catalog:v12:database-and-verified-fallback';
+const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:verified-stale-v1`;
 
 let dbBackoffUntil = 0;
 
@@ -89,7 +90,7 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
     return result;
   } catch (error) {
     dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
-    console.warn(`[catalog-db] Database unavailable; serving stale catalog for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
+    console.warn(`[catalog-db] Database unavailable; serving verified catalog fallback for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
     return null;
   }
 }
@@ -112,6 +113,12 @@ async function loadCatalog(): Promise<Channel[]> {
   const stalePrimary = ttlGetStale<Channel[]>(CATALOG_CACHE_KEY);
   if (stalePrimary && stalePrimary.length > 0) return stalePrimary;
 
+  const verifiedCatalog = await normalizeCatalog(loadVerifiedCatalog(), false);
+  if (verifiedCatalog.length > 0) {
+    ttlSet(SOURCE_FALLBACK_CACHE_KEY, verifiedCatalog, SOURCE_FALLBACK_CACHE_TTL_MS);
+    return verifiedCatalog;
+  }
+
   return [];
 }
 
@@ -120,8 +127,8 @@ export async function getCatalog() {
 }
 
 /**
- * Interactive discovery is database-only. It can use stale database-derived data,
- * but it must never trigger public-source discovery during a user request.
+ * Interactive discovery uses the database when available and falls back to the
+ * verified catalog committed with the application when the database is empty/unavailable.
  */
 export async function getDatabaseCatalog() {
   const warmCatalog = ttlGet<Channel[]>(CATALOG_CACHE_KEY);
@@ -131,7 +138,9 @@ export async function getDatabaseCatalog() {
   if (staleCatalog && staleCatalog.length > 0) return staleCatalog;
 
   const databaseCatalog = await fetchCatalogFromDb();
-  return databaseCatalog ?? [];
+  if (databaseCatalog && databaseCatalog.length > 0) return databaseCatalog;
+
+  return normalizeCatalog(loadVerifiedCatalog(), false);
 }
 
 export function invalidateCatalogCache() {
