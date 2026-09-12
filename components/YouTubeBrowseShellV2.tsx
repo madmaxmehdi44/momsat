@@ -93,8 +93,8 @@ function Card({ channel, favorite, onFavorite, onRecent, delay = 0 }: { channel:
     event.preventDefault();
     onRecent(channel.id);
     play({
-      channelId: channel.id,
-      channelName: channel.name,
+      id: channel.id,
+      name: channel.name,
       url: channel.url,
       referer: channel.referer,
       origin: channel.origin,
@@ -116,7 +116,7 @@ function Card({ channel, favorite, onFavorite, onRecent, delay = 0 }: { channel:
       </Link>
       <div className={styles.cardInfo}>
         <button className={`${styles.favorite}${favorite ? ` ${styles.favoriteActive}` : ''}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onFavorite(channel.id); }} aria-label={favorite ? 'حذف از علاقه‌مندی‌ها' : 'افزودن به علاقه‌مندی‌ها'}><Heart size={16} fill={favorite ? 'currentColor' : 'none'} /></button>
-        <button type="button" onClick={() => { onRecent(channel.id); play({ channelId: channel.id, channelName: channel.name, url: channel.url, referer: channel.referer, origin: channel.origin, image: channel.image }); router.push(`/?playing=${channel.id}`); }} className={styles.cardTitle}>{channel.name}</button>
+        <button type="button" onClick={() => { onRecent(channel.id); play({ id: channel.id, name: channel.name, url: channel.url, referer: channel.referer, origin: channel.origin, image: channel.image }); router.push(`/?playing=${channel.id}`); }} className={styles.cardTitle}>{channel.name}</button>
         <div className={styles.cardMeta}>{channel.category || 'شبکه تلویزیونی'} · {channel.sources.length} منبع</div>
         <div className={styles.cardSub}>{channel.country || 'پخش آنلاین'}{channel.satellite ? ` · ${channel.satellite}` : ''}</div>
       </div>
@@ -182,7 +182,6 @@ export default function YouTubeBrowseShellV2({ channels, initialQuery = '', init
     });
   }, [channels, query, category, libraryMode, favorites, recent]);
 
-  const recentChannels = useMemo(() => recent.map((id) => channels.find((c) => c.id === id)).filter((c): c is Channel => Boolean(c)), [channels, recent]);
   const popular = useMemo(() => [...filtered].sort((a, b) => b.popular - a.popular || b.sources.length - a.sources.length), [filtered]);
   const news = useMemo(() => filtered.filter((c) => matches(c, 'news')), [filtered]);
   const persian = useMemo(() => filtered.filter((c) => matches(c, 'persian')), [filtered]);
@@ -272,7 +271,7 @@ export default function YouTubeBrowseShellV2({ channels, initialQuery = '', init
               <div className={styles.heroEyebrow}>پخش زنده · MOMSAT</div>
               <h1>تلویزیون زنده، همین حالا</h1>
               <p>{heroChannel ? `پخش مستقیم ${heroChannel.name}` : 'شبکه‌های زنده را جستجو و تماشا کنید.'}</p>
-              {heroChannel ? <button type="button" className={styles.heroButton} onClick={() => { markRecent(heroChannel.id); play({ channelId: heroChannel.id, channelName: heroChannel.name, url: heroChannel.url, referer: heroChannel.referer, origin: heroChannel.origin, image: heroChannel.image }); router.push(`/?playing=${heroChannel.id}`); }}><Play size={17} fill="currentColor" /> تماشای زنده</button> : null}
+              {heroChannel ? <button type="button" className={styles.heroButton} onClick={() => { markRecent(heroChannel.id); play({ id: heroChannel.id, name: heroChannel.name, url: heroChannel.url, referer: heroChannel.referer, origin: heroChannel.origin, image: heroChannel.image }); router.push(`/?playing=${heroChannel.id}`); }}><Play size={17} fill="currentColor" /> تماشای زنده</button> : null}
             </div>
             <div className={styles.heroVisual}>{heroChannel?.image ? <img src={heroChannel.image} alt="" onLoad={() => setHeroReady(true)} /> : null}{!heroReady && heroChannel ? <div className={styles.heroSkeleton} /> : null}</div>
           </section>
