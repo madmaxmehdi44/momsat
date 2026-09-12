@@ -27,9 +27,7 @@ body {
 
 a { color: inherit; }
 
-input, select, textarea, button {
-  font: inherit;
-}
+input, select, textarea, button { font: inherit; }
 
 input, select, textarea {
   color: var(--text);
@@ -65,23 +63,14 @@ nav { color: var(--muted) !important; }
 .admin-table td { color: var(--text) !important; }
 
 /* Discovery/Home shell */
-[class*="YouTubeBrowseShellV2_shell"] {
-  background: var(--momsat-bg) !important;
-  color: var(--momsat-text) !important;
-}
+[class*="YouTubeBrowseShellV2_shell"] { background: var(--momsat-bg) !important; color: var(--momsat-text) !important; }
 [class*="YouTubeBrowseShellV2_header"],
 [class*="YouTubeBrowseShellV2_sidebar"],
-[class*="YouTubeBrowseShellV2_categoryBar"] {
-  background-color: var(--momsat-bg) !important;
-  border-color: var(--momsat-line) !important;
-}
+[class*="YouTubeBrowseShellV2_categoryBar"] { background-color: var(--momsat-bg) !important; border-color: var(--momsat-line) !important; }
 [class*="YouTubeBrowseShellV2_search"],
 [class*="YouTubeBrowseShellV2_hero"],
 [class*="YouTubeBrowseShellV2_empty"],
-[class*="YouTubeBrowseShellV2_thumb"] {
-  background-color: var(--momsat-panel) !important;
-  border-color: var(--momsat-line) !important;
-}
+[class*="YouTubeBrowseShellV2_thumb"] { background-color: var(--momsat-panel) !important; border-color: var(--momsat-line) !important; }
 [class*="YouTubeBrowseShellV2_search"] { color: var(--momsat-muted) !important; }
 [class*="YouTubeBrowseShellV2_search"] input,
 [class*="YouTubeBrowseShellV2_cardTitle"],
@@ -97,17 +86,9 @@ nav { color: var(--muted) !important; }
 [class*="YouTubeBrowseShellV2_navItem"],
 [class*="YouTubeBrowseShellV2_categoryChip"],
 [class*="YouTubeBrowseShellV2_railActions"] button,
-[class*="YouTubeBrowseShellV2_gridHeading"] button {
-  color: var(--momsat-text) !important;
-  border-color: var(--momsat-line) !important;
-  background-color: var(--momsat-panel-2) !important;
-}
+[class*="YouTubeBrowseShellV2_gridHeading"] button { color: var(--momsat-text) !important; border-color: var(--momsat-line) !important; background-color: var(--momsat-panel-2) !important; }
 [class*="YouTubeBrowseShellV2_navActive"],
-[class*="YouTubeBrowseShellV2_categorySelected"] {
-  background: var(--momsat-text) !important;
-  color: var(--momsat-bg) !important;
-  border-color: var(--momsat-text) !important;
-}
+[class*="YouTubeBrowseShellV2_categorySelected"] { background: var(--momsat-text) !important; color: var(--momsat-bg) !important; border-color: var(--momsat-text) !important; }
 [class*="YouTubeBrowseShellV2_categorySelected"] em { background: var(--momsat-panel-2) !important; color: var(--momsat-text) !important; }
 [class*="YouTubeBrowseShellV2_live"],
 [class*="YouTubeBrowseShellV2_heroEyebrow"] i { background-color: var(--momsat-accent) !important; }
@@ -115,8 +96,8 @@ nav { color: var(--muted) !important; }
 [class*="YouTubeBrowseShellV2_navActive"] svg { color: var(--momsat-accent) !important; }
 [class*="YouTubeBrowseShellV2_hero"] { box-shadow: 0 14px 40px color-mix(in srgb, var(--momsat-bg) 65%, transparent) !important; }
 
-/* Player chrome: keep controls readable while inheriting the selected accent. */
-.pro-player-live { background: color-mix(in srgb, var(--accent) 88%, #ff315b) !important; }
+/* Player chrome: selected theme controls every player surface and accent. */
+.pro-player-live { background: color-mix(in srgb, var(--accent) 88%, var(--accent2)) !important; }
 .icon-button, .text-button { color: var(--text) !important; background: color-mix(in srgb, var(--panel) 78%, transparent) !important; }
 .icon-button:hover, .text-button:hover { background: color-mix(in srgb, var(--accent) 20%, var(--panel)) !important; color: var(--accent) !important; }
 .player-pro-shell { background: var(--bg) !important; }
@@ -129,9 +110,11 @@ nav { color: var(--muted) !important; }
 .player-pro-metric { border-color: var(--line) !important; }
 .player-pro-metric > svg, .player-pro-live-readout strong { color: var(--accent) !important; }
 
-/* Admin pages may use legacy inline styling; route marker classes take precedence where present. */
+/* Admin route: consume global tokens even where legacy inline styles remain. */
 [data-momsat-admin] { background: var(--bg) !important; color: var(--text) !important; }
 [data-momsat-admin] > div > div { background: var(--panel) !important; border-color: var(--line) !important; }
+[data-momsat-admin] input, [data-momsat-admin] select, [data-momsat-admin] textarea { background: var(--panel) !important; color: var(--text) !important; border-color: var(--line) !important; }
+[data-momsat-admin] button { border-color: var(--line) !important; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
