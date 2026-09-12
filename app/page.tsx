@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic';
 
-import { getCatalog } from '../lib/catalog-db';
-import { getDatabaseCatalog } from '../lib/catalog-db';
+import { getCatalog, getDatabaseCatalog } from '../lib/catalog-db';
 import YouTubeBrowseShellV2 from '../components/YouTubeBrowseShellV2';
 import DiscoveryShell from '../components/DiscoveryShell';
 
