@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { withDbReadTimeout } from './db-timeout';
 import { fetchCatalogSources, type Channel } from './source';
 import { matchChannel, type MatchableChannel } from './channel-match';
 import { probeStream, type StreamProbeResult } from './stream-probe';
@@ -45,14 +46,14 @@ function preferredSources(candidate: Candidate, existing: Existing | null) {
 }
 
 async function loadExisting(): Promise<Existing[]> {
-  return prisma.channel.findMany({
+  return withDbReadTimeout((tx) => tx.channel.findMany({
     select: {
       id: true, name: true, nameEn: true, catalogKey: true, url: true, categoryId: true, archiveStatus: true, image: true,
       referer: true, origin: true, vpn: true, iran: true, popular: true, vip: true, language: true, country: true, platform: true,
       satellite: true, frequency: true, polarization: true, symbolRate: true, serviceId: true, categoryName: true, categoryNameEn: true,
       sources: { select: { id: true, title: true, url: true, referer: true, origin: true, country: true, vip: true } },
     }, orderBy: { id: 'asc' },
-  }) as Promise<Existing[]>;
+  })) as Promise<Existing[]>;
 }
 
 function stableId(value: string) {
