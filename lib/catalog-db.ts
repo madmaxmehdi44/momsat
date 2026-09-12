@@ -22,8 +22,11 @@ type DbChannel = Awaited<ReturnType<typeof prisma.channel.findMany>>[number] & {
   sources: Array<{ id: number; title: string | null; url: string; referer: string | null; origin: string | null; country: string | null; vip: boolean }>;
 };
 
-const DB_CATALOG_TIMEOUT_MS = 1800;
+const DB_CATALOG_TIMEOUT_MS = Math.max(700, Number(process.env.CATALOG_DB_TIMEOUT_MS || 1200));
+const DB_FAILURE_BACKOFF_MS = Math.max(5_000, Number(process.env.CATALOG_DB_FAILURE_BACKOFF_MS || 30_000));
 const STREAM_HEALTH_TIMEOUT_MS = 700;
+
+let dbBackoffUntil = 0;
 
 function toCatalog(channel: DbChannel): Channel {
   const primary = channel.url
@@ -82,6 +85,8 @@ async function normalizeCatalog(channels: Channel[]) {
 
 async function fetchCatalogFromDb(): Promise<Channel[] | null> {
   if (!process.env.DATABASE_URL?.trim()) return null;
+  if (Date.now() < dbBackoffUntil) return null;
+
   try {
     const timeout = new Promise<null>((resolve) => {
       setTimeout(() => resolve(null), DB_CATALOG_TIMEOUT_MS);
@@ -94,12 +99,15 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
 
     const result = await Promise.race([databaseLoad, timeout]);
     if (result === null) {
-      console.warn(`[catalog-db] Database catalog timed out after ${DB_CATALOG_TIMEOUT_MS}ms; falling back to configured catalog sources.`);
+      dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
+      console.warn(`[catalog-db] Database catalog timed out after ${DB_CATALOG_TIMEOUT_MS}ms; using configured catalog sources for ${DB_FAILURE_BACKOFF_MS}ms.`);
       return null;
     }
+    dbBackoffUntil = 0;
     return result;
   } catch (error) {
-    console.warn('[catalog-db] Database unavailable, falling back to configured catalog sources.', error);
+    dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
+    console.warn(`[catalog-db] Database unavailable; using configured catalog sources for ${DB_FAILURE_BACKOFF_MS}ms.`, error);
     return null;
   }
 }
@@ -113,7 +121,7 @@ async function loadCatalog(): Promise<Channel[]> {
 }
 
 export async function getCatalog() {
-  return ttlGetOrSet('momsat:catalog:v7:database-first-health-ranked-reliable-thumbnails', catalogTtlMs(), loadCatalog);
+  return ttlGetOrSet('momsat:catalog:v8:database-first-health-ranked-reliable-thumbnails-with-db-backoff', catalogTtlMs(), loadCatalog);
 }
 
 export function getCategories(channels: Channel[]) {
@@ -122,7 +130,7 @@ export function getCategories(channels: Channel[]) {
 
 export async function findChannel(id: number) {
   if (!Number.isInteger(id) || id <= 0) return null;
-  if (process.env.DATABASE_URL?.trim()) {
+  if (process.env.DATABASE_URL?.trim() && Date.now() >= dbBackoffUntil) {
     try {
       const row = await prisma.channel.findUnique({ where: { id }, include: dbInclude });
       if (row) {
@@ -130,6 +138,7 @@ export async function findChannel(id: number) {
         if (channel) return channel;
       }
     } catch (error) {
+      dbBackoffUntil = Date.now() + DB_FAILURE_BACKOFF_MS;
       console.warn('[catalog-db] Database unavailable while resolving channel, using cached catalog.', error);
     }
   }
