@@ -48,7 +48,7 @@ export default function ControlCenterNav() {
             </Link>
           );
         })}
-        <Link href="/browse" className={styles.exit}>بازگشت به محصول</Link>
+        <Link href="/" className={styles.exit}>بازگشت به صفحه اصلی</Link>
       </nav>
 
       <div className={styles.statusRow}>
