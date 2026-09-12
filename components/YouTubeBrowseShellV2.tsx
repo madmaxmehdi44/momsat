@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Clock3, Compass, Film, Globe2, Heart, Home, Menu, Music2, Play, Radio, Search, Settings, Trophy, Tv, UserCircle } from 'lucide-react';
 import type { Channel } from '../lib/source';
+import { useRouter } from 'next/navigation';
+import { usePersistentPlayer } from './PersistentPlayerProvider';
 import styles from './YouTubeBrowseShellV2.module.css';
 import sidebarStyles from './YouTubeBrowseSidebar.module.css';
 
@@ -84,9 +86,26 @@ function preloadImages(urls: Array<string | null | undefined>) {
 
 function Card({ channel, favorite, onFavorite, onRecent, delay = 0 }: { channel: Channel; favorite: boolean; onFavorite: (id: number) => void; onRecent: (id: number) => void; delay?: number }) {
   const [loaded, setLoaded] = useState(false);
+  const router = useRouter();
+  const { play } = usePersistentPlayer();
+
+  const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    onRecent(channel.id);
+    play({
+      channelId: channel.id,
+      channelName: channel.name,
+      url: channel.url,
+      referer: channel.referer,
+      origin: channel.origin,
+      image: channel.image,
+    });
+    router.push(`/?playing=${channel.id}`);
+  };
+
   return (
     <article className={styles.card} style={{ animationDelay: `${Math.min(delay, 12) * 35}ms` }}>
-      <Link href={`/channel/${channel.id}`} className={styles.cardLink} onClick={() => onRecent(channel.id)}>
+      <Link href={`/?playing=${channel.id}`} className={styles.cardLink} onClick={handleOpen}>
         <div className={`${styles.thumb} ${loaded ? styles.thumbLoaded : ''}`}>
           {!loaded && <div className={styles.thumbSkeleton}><span /></div>}
           {channel.image ? <img src={channel.image} alt="" loading="lazy" decoding="async" onLoad={() => setLoaded(true)} onError={() => setLoaded(true)} /> : <div className={styles.fallback}>{(channel.nameEn || channel.name).slice(0, 3).toUpperCase()}</div>}
@@ -97,7 +116,7 @@ function Card({ channel, favorite, onFavorite, onRecent, delay = 0 }: { channel:
       </Link>
       <div className={styles.cardInfo}>
         <button className={`${styles.favorite}${favorite ? ` ${styles.favoriteActive}` : ''}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onFavorite(channel.id); }} aria-label={favorite ? 'حذف از علاقه‌مندی‌ها' : 'افزودن به علاقه‌مندی‌ها'}><Heart size={16} fill={favorite ? 'currentColor' : 'none'} /></button>
-        <Link href={`/channel/${channel.id}`} onClick={() => onRecent(channel.id)} className={styles.cardTitle}>{channel.name}</Link>
+        <button type="button" onClick={() => { onRecent(channel.id); play({ channelId: channel.id, channelName: channel.name, url: channel.url, referer: channel.referer, origin: channel.origin, image: channel.image }); router.push(`/?playing=${channel.id}`); }} className={styles.cardTitle}>{channel.name}</button>
         <div className={styles.cardMeta}>{channel.category || 'شبکه تلویزیونی'} · {channel.sources.length} منبع</div>
         <div className={styles.cardSub}>{channel.country || 'پخش آنلاین'}{channel.satellite ? ` · ${channel.satellite}` : ''}</div>
       </div>
@@ -105,7 +124,7 @@ function Card({ channel, favorite, onFavorite, onRecent, delay = 0 }: { channel:
   );
 }
 
-function Rail({ title, subtitle, items, favorites, onFavorite, onRecent, onSeeAll }: { title: string; subtitle?: string; items: Channel[]; favorites: number[]; onFavorite: (id: number) => void; onRecent: (id: number) => void; onSeeAll?: () => void }) {
+function Rail({ title, subtitle, items, favorites, onFavorite, onRecent }: { title: string; subtitle?: string; items: Channel[]; favorites: number[]; onFavorite: (id: number) => void; onRecent: (id: number) => void }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   if (!items.length) return null;
   const scroll = (dir: number) => viewportRef.current?.scrollBy({ left: dir * Math.max(420, viewportRef.current.clientWidth * 0.8), behavior: 'smooth' });
@@ -116,7 +135,6 @@ function Rail({ title, subtitle, items, favorites, onFavorite, onRecent, onSeeAl
         <div className={styles.railActions}>
           <button onClick={() => scroll(1)} aria-label="بعدی"><ChevronRight size={18} /></button>
           <button onClick={() => scroll(-1)} aria-label="قبلی"><ChevronLeft size={18} /></button>
-          {onSeeAll ? <button className={styles.seeAll} onClick={onSeeAll}>همه</button> : null}
         </div>
       </div>
       <div className={styles.railViewport} ref={viewportRef}>
@@ -134,6 +152,8 @@ export default function YouTubeBrowseShellV2({ channels, initialQuery = '', init
   const [favorites, setFavorites] = useState<number[]>([]);
   const [recent, setRecent] = useState<number[]>([]);
   const [heroReady, setHeroReady] = useState(false);
+  const router = useRouter();
+  const { play } = usePersistentPlayer();
 
   useEffect(() => {
     setFavorites(readIds(FAVORITES_KEY));
@@ -152,9 +172,7 @@ export default function YouTubeBrowseShellV2({ channels, initialQuery = '', init
   const iranInternational = useMemo(() => getIranInternationalTv(channels), [channels]);
   const heroChannel = useMemo(() => iranInternational ?? channels.find((channel) => matches(channel, 'news')) ?? channels[0] ?? null, [channels, iranInternational]);
 
-  useEffect(() => {
-    preloadImages([heroChannel?.image]);
-  }, [heroChannel]);
+  useEffect(() => { preloadImages([heroChannel?.image]); }, [heroChannel]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
@@ -197,8 +215,8 @@ export default function YouTubeBrowseShellV2({ channels, initialQuery = '', init
     return next;
   });
 
-  const reset = () => { setQuery(''); setCategory('all'); setLibraryMode('all'); };
-  const navCategory = (id: string) => { setLibraryMode('all'); setCategory(id); setQuery(''); };
+  const reset = () => { setQuery(''); setCategory('all'); setLibraryMode('all'); router.replace('/'); };
+  const navCategory = (id: string) => { setLibraryMode('all'); setCategory(id); setQuery(''); router.replace(`/?category=${encodeURIComponent(id)}`); };
   const browseActive = libraryMode === 'all' && (Boolean(query) || category !== 'all');
   const homeActive = libraryMode === 'all' && !query && category === 'all';
 
@@ -207,7 +225,7 @@ export default function YouTubeBrowseShellV2({ channels, initialQuery = '', init
       <header className={styles.header}>
         <div className={styles.headerSide}>
           <button className={styles.icon} onClick={() => setSidebarOpen((v) => !v)} aria-label={sidebarOpen ? 'بستن منو' : 'باز کردن منو'} aria-expanded={sidebarOpen}><Menu size={22} /></button>
-          <Link href="/browse" className={styles.logo}>MOM<span>SAT</span></Link>
+          <button type="button" className={styles.logo} onClick={reset}>MOM<span>SAT</span></button>
         </div>
         <div className={styles.search}>
           <Search size={19} />
@@ -228,103 +246,55 @@ export default function YouTubeBrowseShellV2({ channels, initialQuery = '', init
             </div>
             <span className={sidebarStyles.status}><i /> زنده</span>
           </div>
-
           <nav aria-label="ناوبری اصلی">
             <section className={sidebarStyles.section}>
               <div className={sidebarStyles.sectionLabel}>محتوا</div>
-              <button className={`${styles.navItem} ${sidebarStyles.navItem}${homeActive ? ` ${styles.navActive}` : ''}`} onClick={reset} aria-current={homeActive ? 'page' : undefined} title="خانه">
-                <Home size={19} /><span className={sidebarStyles.navText}><span>خانه</span></span>
-              </button>
-              <button className={`${styles.navItem} ${sidebarStyles.navItem}${browseActive ? ` ${styles.navActive}` : ''}`} onClick={reset} aria-current={browseActive ? 'page' : undefined} title="کشف شبکه‌ها">
-                <Compass size={19} /><span className={sidebarStyles.navText}><span>کشف شبکه‌ها</span></span>
-              </button>
-              <button className={`${styles.navItem} ${sidebarStyles.navItem}${category === 'news' && libraryMode === 'all' ? ` ${styles.navActive}` : ''}`} onClick={() => navCategory('news')} aria-current={category === 'news' && libraryMode === 'all' ? 'page' : undefined} title="اخبار زنده">
-                <Tv size={19} /><span className={sidebarStyles.navText}><span>اخبار زنده</span><small className={sidebarStyles.navHint}>NEWS</small></span>
-              </button>
-              <button className={`${styles.navItem} ${sidebarStyles.navItem}${category === 'persian' && libraryMode === 'all' ? ` ${styles.navActive}` : ''}`} onClick={() => navCategory('persian')} aria-current={category === 'persian' && libraryMode === 'all' ? 'page' : undefined} title="شبکه‌های فارسی">
-                <Globe2 size={19} /><span className={sidebarStyles.navText}><span>شبکه‌های فارسی</span></span>
-              </button>
+              <button className={`${styles.navItem} ${sidebarStyles.navItem}${homeActive ? ` ${styles.navActive}` : ''}`} onClick={reset} aria-current={homeActive ? 'page' : undefined} title="خانه"><Home size={19} /><span className={sidebarStyles.navText}><span>خانه</span></span></button>
+              <button className={`${styles.navItem} ${sidebarStyles.navItem}${browseActive ? ` ${styles.navActive}` : ''}`} onClick={() => { setLibraryMode('all'); }} aria-current={browseActive ? 'page' : undefined} title="کشف شبکه‌ها"><Compass size={19} /><span className={sidebarStyles.navText}><span>کشف شبکه‌ها</span></span></button>
+              {CATEGORIES.filter((category) => category.id !== 'all').map((item) => <button key={item.id} className={`${styles.navItem} ${sidebarStyles.navItem}${category === item.id && libraryMode === 'all' ? ` ${styles.navActive}` : ''}`} onClick={() => navCategory(item.id)} title={item.label}>{item.icon}<span className={sidebarStyles.navText}><span>{item.label}</span><em>{counts[item.id]}</em></span></button>)}
             </section>
-
-            <div className={sidebarStyles.separator} />
-
             <section className={sidebarStyles.section}>
-              <div className={sidebarStyles.sectionLabel}>کتابخانه من</div>
-              <button className={`${styles.navItem} ${sidebarStyles.navItem}${libraryMode === 'favorites' ? ` ${styles.navActive}` : ''}`} onClick={() => { setLibraryMode('favorites'); setCategory('all'); setQuery(''); }} aria-current={libraryMode === 'favorites' ? 'page' : undefined} title="علاقه‌مندی‌ها">
-                <Heart size={19} /><span className={sidebarStyles.navText}><span>علاقه‌مندی‌ها</span><b className={`${sidebarStyles.badge}${favorites.length ? ` ${sidebarStyles.navActiveBadge}` : ''}`}>{favorites.length}</b></span>
-              </button>
-              <button className={`${styles.navItem} ${sidebarStyles.navItem}${libraryMode === 'recent' ? ` ${styles.navActive}` : ''}`} onClick={() => { setLibraryMode('recent'); setCategory('all'); setQuery(''); }} aria-current={libraryMode === 'recent' ? 'page' : undefined} title="اخیراً تماشا شده">
-                <Clock3 size={19} /><span className={sidebarStyles.navText}><span>اخیراً تماشا شده</span><b className={sidebarStyles.badge}>{recent.length}</b></span>
-              </button>
+              <div className={sidebarStyles.sectionLabel}>کتابخانه</div>
+              <button className={`${styles.navItem} ${sidebarStyles.navItem}${libraryMode === 'favorites' ? ` ${styles.navActive}` : ''}`} onClick={() => { setLibraryMode('favorites'); setQuery(''); router.replace('/?favorites=1'); }} title="علاقه‌مندی‌ها"><Heart size={19} /><span className={sidebarStyles.navText}><span>علاقه‌مندی‌ها</span><em>{favorites.length}</em></span></button>
+              <button className={`${styles.navItem} ${sidebarStyles.navItem}${libraryMode === 'recent' ? ` ${styles.navActive}` : ''}`} onClick={() => { setLibraryMode('recent'); setQuery(''); router.replace('/?recent=1'); }} title="اخیراً تماشا شده"><Clock3 size={19} /><span className={sidebarStyles.navText}><span>اخیراً تماشا شده</span></span></button>
             </section>
-
-            <div className={sidebarStyles.separator} />
-
-            <section className={`${sidebarStyles.section} ${sidebarStyles.desktopOnly}`}>
-              <div className={sidebarStyles.sectionLabel}>سرویس</div>
-              <Link className={`${styles.navItem} ${sidebarStyles.navItem}`} href="/guide" title="راهنمای پخش"><Radio size={19} /><span className={sidebarStyles.navText}><span>راهنمای پخش</span></span></Link>
-              <Link className={`${styles.navItem} ${sidebarStyles.navItem}`} href="/settings" title="تنظیمات"><Settings size={19} /><span className={sidebarStyles.navText}><span>تنظیمات</span></span></Link>
-              <Link className={`${styles.navItem} ${sidebarStyles.navItem} ${sidebarStyles.adminLink}`} href="/admin" title="مدیریت MOMSAT"><Tv size={19} /><span className={sidebarStyles.navText}><span>مدیریت MOMSAT</span></span></Link>
+            <section className={sidebarStyles.section}>
+              <div className={sidebarStyles.sectionLabel}>سیستم</div>
+              <button className={`${styles.navItem} ${sidebarStyles.navItem}`} onClick={() => router.push('/settings')} title="تنظیمات"><Settings size={19} /><span className={sidebarStyles.navText}><span>تنظیمات</span></span></button>
+              <button className={`${styles.navItem} ${sidebarStyles.navItem}`} onClick={() => router.push('/admin')} title="مدیریت MOMSAT"><Tv size={19} /><span className={sidebarStyles.navText}><span>مدیریت MOMSAT</span></span></button>
             </section>
           </nav>
-
-          <div className={sidebarStyles.mobileSection} aria-label="ناوبری موبایل">
-            <button className={`${styles.navItem} ${sidebarStyles.navItem} ${sidebarStyles.mobileItem}${homeActive ? ` ${styles.navActive}` : ''}`} onClick={reset} title="خانه"><Home size={18} /><span className={sidebarStyles.navText}><span>خانه</span></span></button>
-            <button className={`${styles.navItem} ${sidebarStyles.navItem} ${sidebarStyles.mobileItem}${browseActive ? ` ${styles.navActive}` : ''}`} onClick={reset} title="کشف"><Compass size={18} /><span className={sidebarStyles.navText}><span>کشف</span></span></button>
-            <button className={`${styles.navItem} ${sidebarStyles.navItem} ${sidebarStyles.mobileItem}${category === 'news' && libraryMode === 'all' ? ` ${styles.navActive}` : ''}`} onClick={() => navCategory('news')} title="اخبار"><Tv size={18} /><span className={sidebarStyles.navText}><span>اخبار</span></span></button>
-            <button className={`${styles.navItem} ${sidebarStyles.navItem} ${sidebarStyles.mobileItem}${libraryMode === 'favorites' ? ` ${styles.navActive}` : ''}`} onClick={() => { setLibraryMode('favorites'); setCategory('all'); setQuery(''); }} title="علاقه‌مندی‌ها"><Heart size={18} /><span className={sidebarStyles.navText}><span>علاقه‌مندی</span></span></button>
-            <Link className={`${styles.navItem} ${sidebarStyles.navItem} ${sidebarStyles.mobileItem}`} href="/settings" title="تنظیمات"><Settings size={18} /><span className={sidebarStyles.navText}><span>تنظیمات</span></span></Link>
-          </div>
         </aside>
 
-        <main className={styles.content}>
-          {homeActive ? (
-            <section className={`${styles.hero} ${heroReady ? styles.heroReady : styles.heroLoading}`} aria-busy={!heroReady}>
-              <div className={styles.heroImage}>
-                {heroChannel?.image ? <img src={heroChannel.image} alt="" fetchPriority="high" decoding="async" onLoad={() => setHeroReady(true)} onError={() => setHeroReady(true)} /> : null}
-                {!heroReady && <div className={styles.heroSkeleton}><span /><span /><span /></div>}
-              </div>
-              <div className={styles.heroShade} />
-              <div className={styles.heroContent}>
-                <div className={styles.heroEyebrow}><i /> {heroChannel ? 'پخش زنده خبری' : 'پخش زنده'}</div>
-                <h1>{heroChannel?.name || 'MOMSAT Live'}</h1>
-                <p>{heroChannel ? `${heroChannel.nameEn || heroChannel.name} · اخبار و تحلیل زنده · ${heroChannel.category || 'شبکه تلویزیونی'}` : 'شبکه‌های زنده را همین‌جا پیدا و تماشا کن.'}</p>
-                <div className={styles.heroActions}>
-                  <Link href={heroChannel ? `/channel/${heroChannel.id}` : '/browse?category=news'} className={styles.watch}><Play size={17} fill="currentColor" /> تماشا</Link>
-                  <button className={styles.info} onClick={() => navCategory('news')}>اخبار بیشتر</button>
-                </div>
-              </div>
-              <div className={styles.heroLive}><span /><b>LIVE</b><small>پخش زنده</small></div>
-            </section>
-          ) : null}
-
-          <div className={styles.categoryBar} aria-label="دسته‌بندی‌ها">
-            {CATEGORIES.map((item) => <button key={item.id} className={`${styles.categoryChip}${category === item.id ? ` ${styles.categorySelected}` : ''}`} onClick={() => navCategory(item.id)}><span className={styles.categoryIcon}>{item.icon}</span><span>{item.label}</span><em>{counts[item.id]}</em></button>)}
-          </div>
-
-          {homeActive ? <Rail title="اخیراً تماشا شده" subtitle="سریع به شبکه‌های قبلی برگرد" items={recentChannels} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} onSeeAll={() => setLibraryMode('recent')} /> : null}
-          {libraryMode === 'favorites' ? <Rail title="علاقه‌مندی‌های من" subtitle="شبکه‌های ذخیره‌شده روی این دستگاه" items={filtered} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} /> : null}
-          {libraryMode === 'recent' ? <Rail title="تاریخچه تماشا" subtitle="آخرین شبکه‌هایی که باز کرده‌ای" items={filtered} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} /> : null}
-          {libraryMode === 'all' ? <Rail title="محبوب‌ترین شبکه‌ها" subtitle="اولویت با کانال‌های پرامتیاز و دارای مسیرهای بیشتر" items={popular} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} /> : null}
-          {libraryMode === 'all' ? <Rail title="اخبار" subtitle="شبکه‌های خبری و تحلیل" items={news} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} onSeeAll={() => navCategory('news')} /> : null}
-          {libraryMode === 'all' ? <Rail title="شبکه‌های فارسی" subtitle="پخش زنده فارسی‌زبان" items={persian} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} onSeeAll={() => navCategory('persian')} /> : null}
-          {libraryMode === 'all' ? <Rail title="ورزش" subtitle="شبکه‌های ورزشی و مسابقات" items={sports} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} onSeeAll={() => navCategory('sport')} /> : null}
-          {libraryMode === 'all' ? <Rail title="موسیقی" subtitle="موزیک و سرگرمی" items={music} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} onSeeAll={() => navCategory('music')} /> : null}
-          {libraryMode === 'all' ? <Rail title="فیلم و سریال" subtitle="شبکه‌های فیلم و سریال" items={movies} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} onSeeAll={() => navCategory('movie')} /> : null}
-
-          <section className={styles.gridSection}>
-            <div className={styles.gridHeading}>
-              <div>
-                <h2>{query ? `نتایج جستجو برای «${query}»` : category !== 'all' ? CATEGORIES.find((c) => c.id === category)?.label : 'همه شبکه‌ها'}</h2>
-                <p>{filtered.length.toLocaleString('fa-IR')} شبکه</p>
-              </div>
-              {!homeActive ? <button onClick={reset}>پاک‌کردن فیلترها</button> : null}
+        <main className={styles.main}>
+          <section className={styles.hero}>
+            <div className={styles.heroContent}>
+              <div className={styles.heroEyebrow}>پخش زنده · MOMSAT</div>
+              <h1>تلویزیون زنده، همین حالا</h1>
+              <p>{heroChannel ? `پخش مستقیم ${heroChannel.name}` : 'شبکه‌های زنده را جستجو و تماشا کنید.'}</p>
+              {heroChannel ? <button type="button" className={styles.heroButton} onClick={() => { markRecent(heroChannel.id); play({ channelId: heroChannel.id, channelName: heroChannel.name, url: heroChannel.url, referer: heroChannel.referer, origin: heroChannel.origin, image: heroChannel.image }); router.push(`/?playing=${heroChannel.id}`); }}><Play size={17} fill="currentColor" /> تماشای زنده</button> : null}
             </div>
-            <div className={styles.grid}>{filtered.map((channel, index) => <Card key={channel.id} channel={channel} favorite={favorites.includes(channel.id)} onFavorite={toggleFavorite} onRecent={markRecent} delay={index} />)}</div>
-            {!filtered.length && <div className={styles.empty}><Search size={24} /><strong>شبکه‌ای پیدا نشد</strong><span>فیلتر یا عبارت جستجو را تغییر بده.</span><button onClick={reset}>بازگشت به خانه</button></div>}
+            <div className={styles.heroVisual}>{heroChannel?.image ? <img src={heroChannel.image} alt="" onLoad={() => setHeroReady(true)} /> : null}{!heroReady && heroChannel ? <div className={styles.heroSkeleton} /> : null}</div>
           </section>
+
+          <Rail title="محبوب‌ترین شبکه‌ها" subtitle="پخش‌های زنده پرطرفدار" items={popular} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} />
+          <Rail title="اخبار" subtitle="شبکه‌های خبری زنده" items={news} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} />
+          <Rail title="شبکه‌های فارسی" subtitle="پخش‌های فارسی" items={persian} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} />
+          <Rail title="ورزش" subtitle="شبکه‌های ورزشی زنده" items={sports} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} />
+          <Rail title="موسیقی" subtitle="موسیقی زنده" items={music} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} />
+          <Rail title="فیلم و سریال" subtitle="کانال‌های فیلم و سریال" items={movies} favorites={favorites} onFavorite={toggleFavorite} onRecent={markRecent} />
         </main>
       </div>
+
+      <nav className={styles.mobileNav} aria-label="ناوبری اصلی">
+        <button onClick={reset} className={`${styles.mobileItem}${homeActive ? ` ${styles.mobileActive}` : ''}`}><Home size={18} /><span>خانه</span></button>
+        <button onClick={() => { setLibraryMode('all'); }} className={`${styles.mobileItem}${browseActive ? ` ${styles.mobileActive}` : ''}`}><Compass size={18} /><span>کشف</span></button>
+        <button onClick={() => { setLibraryMode('favorites'); router.replace('/?favorites=1'); }} className={`${styles.mobileItem}${libraryMode === 'favorites' ? ` ${styles.mobileActive}` : ''}`}><Heart size={18} /><span>علاقه‌مندی</span></button>
+        <button onClick={() => { setLibraryMode('recent'); router.replace('/?recent=1'); }} className={`${styles.mobileItem}${libraryMode === 'recent' ? ` ${styles.mobileActive}` : ''}`}><Clock3 size={18} /><span>اخیراً</span></button>
+        <button onClick={() => router.push('/settings')} className={styles.mobileItem}><UserCircle size={18} /><span>تنظیمات</span></button>
+      </nav>
+
+      <div className={styles.playerHost} aria-live="polite" />
     </div>
   );
 }
