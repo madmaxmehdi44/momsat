@@ -2,7 +2,7 @@ import { prisma } from './prisma';
 import { fetchCatalog, categoriesOf, Channel } from './source';
 import { ensureChannelThumbnail } from './channel-thumbnail';
 import { fallbackChannelThumbnail } from './fallback-thumbnail';
-import { ttlGetOrSet } from './ttl-cache';
+import { ttlDelete, ttlGetOrSet } from './ttl-cache';
 import { rankCatalogChannels } from './catalog-ranking';
 import { mergeFeaturedChannels } from './featured-channels';
 import { applyStreamHealth } from './stream-health';
@@ -25,6 +25,8 @@ type DbChannel = Awaited<ReturnType<typeof prisma.channel.findMany>>[number] & {
 const DB_CATALOG_TIMEOUT_MS = Math.max(700, Number(process.env.CATALOG_DB_TIMEOUT_MS || 1200));
 const DB_FAILURE_BACKOFF_MS = Math.max(5_000, Number(process.env.CATALOG_DB_FAILURE_BACKOFF_MS || 30_000));
 const STREAM_HEALTH_TIMEOUT_MS = 700;
+
+export const CATALOG_CACHE_KEY = 'momsat:catalog:v8:database-first-health-ranked-reliable-thumbnails-with-db-backoff';
 
 let dbBackoffUntil = 0;
 
@@ -121,7 +123,11 @@ async function loadCatalog(): Promise<Channel[]> {
 }
 
 export async function getCatalog() {
-  return ttlGetOrSet('momsat:catalog:v8:database-first-health-ranked-reliable-thumbnails-with-db-backoff', catalogTtlMs(), loadCatalog);
+  return ttlGetOrSet(CATALOG_CACHE_KEY, catalogTtlMs(), loadCatalog);
+}
+
+export function invalidateCatalogCache() {
+  ttlDelete(CATALOG_CACHE_KEY);
 }
 
 export function getCategories(channels: Channel[]) {
