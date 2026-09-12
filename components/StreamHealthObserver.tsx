@@ -5,6 +5,12 @@ import type { PersistentChannel } from './PersistentPlayerProvider';
 
 type Props = { channel: PersistentChannel | null };
 
+type PlaybackFailureDetail = {
+  channelId: number;
+  url: string;
+  reason: string;
+};
+
 const FAILURE_GRACE_MS = 8000;
 const FREEZE_RECOVERY_MS = 4500;
 const FREEZE_FAILURE_MS = 12000;
@@ -28,6 +34,10 @@ function report(channelId: number, url: string, outcome: 'success' | 'failure', 
     keepalive: true,
     body: JSON.stringify({ channelId, url, outcome, latencyMs, error }),
   }).catch(() => undefined);
+}
+
+function notifyFailover(detail: PlaybackFailureDetail) {
+  window.dispatchEvent(new CustomEvent<PlaybackFailureDetail>('momsat:playback-failure', { detail }));
 }
 
 export default function StreamHealthObserver({ channel }: Props) {
@@ -66,12 +76,15 @@ export default function StreamHealthObserver({ channel }: Props) {
       if (!video) return null;
       const nextUrl = sourceFromCurrentSrc(video.currentSrc || video.getAttribute('src') || '');
       if (nextUrl && nextUrl !== currentUrl) {
-        clearFailureTimer(); clearFreezeTimer();
+        clearFailureTimer();
+        clearFreezeTimer();
         currentUrl = nextUrl;
         startedAt = performance.now();
         lastCurrentTime = video.currentTime;
         lastProgressAt = performance.now();
-        recoveryAttempted = false; failureReported = false; successReported = false;
+        recoveryAttempted = false;
+        failureReported = false;
+        successReported = false;
       }
       return video;
     };
@@ -79,94 +92,156 @@ export default function StreamHealthObserver({ channel }: Props) {
     const softRecover = (video: HTMLVideoElement) => {
       if (recoveryAttempted || video.paused || video.ended || !currentUrl) return;
       recoveryAttempted = true;
-      try { video.load(); void video.play().catch(() => undefined); } catch {}
+      try {
+        video.load();
+        void video.play().catch(() => undefined);
+      } catch {}
     };
 
-    const onLoadStart = () => { clearFailureTimer(); clearFreezeTimer(); syncCurrentSource(); };
+    const onLoadStart = () => {
+      clearFailureTimer();
+      clearFreezeTimer();
+      syncCurrentSource();
+    };
+
     const onProgress = () => {
-      const video = syncCurrentSource(); if (!video) return;
+      const video = syncCurrentSource();
+      if (!video) return;
       if (video.currentTime !== lastCurrentTime) {
-        lastCurrentTime = video.currentTime; lastProgressAt = performance.now(); recoveryAttempted = false; clearFreezeTimer();
+        lastCurrentTime = video.currentTime;
+        lastProgressAt = performance.now();
+        recoveryAttempted = false;
+        clearFreezeTimer();
       }
     };
+
     const onPlaying = () => {
-      const video = syncCurrentSource(); if (!video || !currentUrl) return;
-      clearFailureTimer(); clearFreezeTimer(); lastCurrentTime = video.currentTime; lastProgressAt = performance.now(); recoveryAttempted = false;
-      if (successReported && !failureReported) return;
-      failureReported = false;
+      const video = syncCurrentSource();
+      if (!video || !currentUrl) return;
+      clearFailureTimer();
+      clearFreezeTimer();
+      lastCurrentTime = video.currentTime;
+      lastProgressAt = performance.now();
+      recoveryAttempted = false;
+      if (successReported) return;
       successReported = true;
       report(channel.id!, currentUrl, 'success', Math.max(0, Math.round(performance.now() - startedAt)));
     };
+
+    const confirmFailure = (reason: string, latencyMs: number) => {
+      if (failureReported || !currentUrl) return;
+      failureReported = true;
+      successReported = false;
+      report(channel.id!, currentUrl, 'failure', latencyMs, reason);
+      notifyFailover({ channelId: channel.id!, url: currentUrl, reason });
+    };
+
     const scheduleFreezeCheck = () => {
       clearFreezeTimer();
       freezeTimer = window.setTimeout(() => {
         freezeTimer = null;
         const video = syncCurrentSource();
         if (!video || video.paused || video.ended || failureReported || !currentUrl) return;
-        const now = performance.now();
-        const frozen = now - lastProgressAt >= FREEZE_RECOVERY_MS && video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        const elapsed = performance.now() - lastProgressAt;
+        const frozen = elapsed >= FREEZE_RECOVERY_MS && video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
         if (!frozen) return;
         softRecover(video);
-        const elapsed = now - lastProgressAt;
         if (elapsed >= FREEZE_FAILURE_MS) {
-          failureReported = true;
-          successReported = false;
-          report(channel.id!, currentUrl, 'failure', Math.max(0, Math.round(now - startedAt)), 'Live playback frozen after recovery attempt');
+          confirmFailure('Live playback frozen after recovery attempt', Math.max(0, Math.round(performance.now() - startedAt)));
           return;
         }
         scheduleFreezeCheck();
       }, FREEZE_RECOVERY_MS);
     };
+
     const onWaiting = () => {
-      const video = syncCurrentSource(); if (!video || video.paused || video.ended || failureReported) return;
+      const video = syncCurrentSource();
+      if (!video || video.paused || video.ended || failureReported) return;
       scheduleFreezeCheck();
     };
+
     const onError = () => {
-      const video = syncCurrentSource(); if (!video || !currentUrl || failureReported) return;
+      const video = syncCurrentSource();
+      if (!video || !currentUrl || failureReported) return;
       clearFailureTimer();
       failureTimer = window.setTimeout(() => {
         failureTimer = null;
-        const latest = syncCurrentSource(); if (!latest || failureReported || !currentUrl) return;
+        const latest = syncCurrentSource();
+        if (!latest || failureReported || !currentUrl) return;
         const stillBroken = latest.error != null && latest.paused && latest.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
         if (!stillBroken) return;
         softRecover(latest);
         failureTimer = window.setTimeout(() => {
           failureTimer = null;
-          const recovered = syncCurrentSource(); if (!recovered || failureReported || !currentUrl) return;
+          const recovered = syncCurrentSource();
+          if (!recovered || failureReported || !currentUrl) return;
           const stillBrokenAfterRecovery = recovered.error != null && recovered.paused && recovered.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
           if (!stillBrokenAfterRecovery) return;
-          failureReported = true;
-          successReported = false;
           const mediaError = recovered.error;
-          report(channel.id!, currentUrl, 'failure', Math.max(0, Math.round(performance.now() - startedAt)), mediaError ? `MediaError ${mediaError.code} after recovery` : 'HTMLMediaElement error after recovery grace');
+          confirmFailure(
+            mediaError ? `MediaError ${mediaError.code} after recovery` : 'HTMLMediaElement error after recovery grace',
+            Math.max(0, Math.round(performance.now() - startedAt)),
+          );
         }, FREEZE_RECOVERY_MS);
       }, FAILURE_GRACE_MS);
     };
 
     const detach = (video: HTMLVideoElement | null) => {
       if (!video) return;
-      video.removeEventListener('loadstart', onLoadStart); video.removeEventListener('playing', onPlaying); video.removeEventListener('timeupdate', onProgress); video.removeEventListener('progress', onProgress); video.removeEventListener('canplay', onProgress); video.removeEventListener('waiting', onWaiting); video.removeEventListener('stalled', onWaiting); video.removeEventListener('error', onError);
+      video.removeEventListener('loadstart', onLoadStart);
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('timeupdate', onProgress);
+      video.removeEventListener('progress', onProgress);
+      video.removeEventListener('canplay', onProgress);
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('stalled', onWaiting);
+      video.removeEventListener('error', onError);
       if (attachedVideo === video) attachedVideo = null;
     };
+
     const attach = () => {
       const video = findVideo();
       if (!video || video === attachedVideo) return;
-      detach(attachedVideo); attachedVideo = video;
-      video.addEventListener('loadstart', onLoadStart); video.addEventListener('playing', onPlaying); video.addEventListener('timeupdate', onProgress); video.addEventListener('progress', onProgress); video.addEventListener('canplay', onProgress); video.addEventListener('waiting', onWaiting); video.addEventListener('stalled', onWaiting); video.addEventListener('error', onError); syncCurrentSource();
+      detach(attachedVideo);
+      attachedVideo = video;
+      video.addEventListener('loadstart', onLoadStart);
+      video.addEventListener('playing', onPlaying);
+      video.addEventListener('timeupdate', onProgress);
+      video.addEventListener('progress', onProgress);
+      video.addEventListener('canplay', onProgress);
+      video.addEventListener('waiting', onWaiting);
+      video.addEventListener('stalled', onWaiting);
+      video.addEventListener('error', onError);
+      syncCurrentSource();
     };
 
     attach();
     timer = window.setInterval(() => {
-      attach(); const video = attachedVideo; if (!video) return;
-      if (video.currentSrc) syncCurrentSource();
+      attach();
+      const video = attachedVideo;
+      if (!video) return;
+      syncCurrentSource();
       if (video.paused || video.ended || failureReported || !currentUrl) return;
-      if (video.currentTime !== lastCurrentTime) { lastCurrentTime = video.currentTime; lastProgressAt = performance.now(); recoveryAttempted = false; clearFreezeTimer(); return; }
+      if (video.currentTime !== lastCurrentTime) {
+        lastCurrentTime = video.currentTime;
+        lastProgressAt = performance.now();
+        recoveryAttempted = false;
+        clearFreezeTimer();
+        return;
+      }
       if (performance.now() - lastProgressAt >= FREEZE_RECOVERY_MS) scheduleFreezeCheck();
     }, PROGRESS_POLL_MS);
 
     const observer = new MutationObserver(() => attach());
     observer.observe(document.body, { childList: true, subtree: true });
-    return () => { if (timer != null) window.clearInterval(timer); clearFailureTimer(); clearFreezeTimer(); observer.disconnect(); detach(attachedVideo); };
+    return () => {
+      if (timer != null) window.clearInterval(timer);
+      clearFailureTimer();
+      clearFreezeTimer();
+      observer.disconnect();
+      detach(attachedVideo);
+    };
   }, [channel?.id]);
+
   return null;
 }
