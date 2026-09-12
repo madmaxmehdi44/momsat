@@ -23,8 +23,20 @@ function reportKey(input: { channelId: number; url: string; outcome: 'success' |
   return `${input.channelId}|${input.url}|${input.outcome}`;
 }
 
+function pruneRecentReports(now: number) {
+  for (const [key, timestamp] of recentReports) {
+    if (now - timestamp >= RECENT_REPORT_TTL_MS) recentReports.delete(key);
+  }
+  while (recentReports.size > 10_000) {
+    const oldestKey = recentReports.keys().next().value;
+    if (oldestKey === undefined) break;
+    recentReports.delete(oldestKey);
+  }
+}
+
 function enqueueReport(key: string, work: () => Promise<void>) {
   const now = Date.now();
+  pruneRecentReports(now);
   const recentAt = recentReports.get(key);
   if (recentAt && now - recentAt < RECENT_REPORT_TTL_MS) return;
   recentReports.set(key, now);
