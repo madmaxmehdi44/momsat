@@ -27,8 +27,8 @@ const DB_CATALOG_TIMEOUT_MS = Math.max(750, Number(process.env.CATALOG_DB_TIMEOU
 const DB_FAILURE_BACKOFF_MS = Math.max(5_000, Number(process.env.CATALOG_DB_FAILURE_BACKOFF_MS || 30_000));
 const SOURCE_FALLBACK_CACHE_TTL_MS = Math.max(60_000, Number(process.env.CATALOG_SOURCE_FALLBACK_TTL_MS || 600_000));
 
-export const CATALOG_CACHE_KEY = 'momsat:catalog:v9:db-read-timeout-health-ranked-reliable-thumbnails';
-const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:source-fallback-v2`;
+export const CATALOG_CACHE_KEY = 'momsat:catalog:v10:bounded-db-and-health-reads';
+const SOURCE_FALLBACK_CACHE_KEY = `${CATALOG_CACHE_KEY}:source-fallback-v3`;
 
 let dbBackoffUntil = 0;
 
@@ -79,12 +79,12 @@ async function fetchCatalogFromDb(): Promise<Channel[] | null> {
   if (Date.now() < dbBackoffUntil) return null;
 
   try {
-    const result = await withDbReadTimeout((tx) => tx.channel.findMany({
+    const rows = await withDbReadTimeout((tx) => tx.channel.findMany({
       where: { archiveStatus: null },
       orderBy: [{ popular: 'desc' }, { name: 'asc' }],
       include: dbInclude,
-    }).then((rows) => normalizeCatalog(rows.map(toCatalog), true)), DB_CATALOG_TIMEOUT_MS);
-
+    }), DB_CATALOG_TIMEOUT_MS);
+    const result = await normalizeCatalog(rows.map(toCatalog), true);
     dbBackoffUntil = 0;
     return result;
   } catch (error) {
