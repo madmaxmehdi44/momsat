@@ -35,9 +35,9 @@ export async function GET() {
       catalog: { channels, sources },
     };
 
-    if (database === 'ok' || database === 'unconfigured') {
-      cached = { expiresAt: Date.now() + HEALTH_CACHE_TTL_MS, payload };
-    }
+    // Cache failures as well as successes. A failing database must not be probed
+    // on every health poll while it is unreachable or its pool is exhausted.
+    cached = { expiresAt: Date.now() + HEALTH_CACHE_TTL_MS, payload };
   }
 
   const adapters = catalogSourceAdapters.map((adapter) => ({
