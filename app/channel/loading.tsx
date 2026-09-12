@@ -6,8 +6,8 @@ export default function ChannelLoading() {
       style={{
         minHeight: '60vh',
         padding: '32px',
-        background: '#0f0f0f',
-        color: '#888',
+        background: 'var(--bg, #0f0f0f)',
+        color: 'var(--muted, #888)',
         display: 'grid',
         placeItems: 'center',
         fontFamily: 'Tahoma, Arial, sans-serif',
