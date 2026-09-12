@@ -9,6 +9,7 @@ import styles from './control-center.module.css';
 
 const items = [
   { href: '/admin', label: 'کاتالوگ و Import', icon: UploadCloud, exact: true },
+  { href: '/admin/database', label: 'جداول DB / CSV', icon: Database },
   { href: '/admin/stream-validator', label: 'صحت‌سنجی استریم', icon: ScanSearch },
   { href: '/admin/stream-health', label: 'سلامت استریم', icon: Radio },
   { href: '/admin/historical', label: 'آرشیو تاریخی', icon: History },
