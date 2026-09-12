@@ -48,7 +48,7 @@ export default function ChannelProfilePage({ channel, recommendations }: { chann
   return (
     <main className={styles.page} dir="rtl">
       <div className={styles.topbar}>
-        <Link href="/browse" className={styles.back}><ArrowLeft size={16} /> بازگشت به کشف شبکه‌ها</Link>
+        <Link href="/" className={styles.back}><ArrowLeft size={16} /> بازگشت به صفحه اصلی</Link>
         <span className={styles.brand}>MOMSAT</span>
       </div>
 
