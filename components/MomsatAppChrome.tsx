@@ -17,23 +17,21 @@ function activePath(pathname: string | null, path: string) {
 
 export default function MomsatAppChrome({ children }: Props) {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(true);
   const [health, setHealth] = useState<Health | null>(null);
   const [running, setRunning] = useState(0);
   const [lastAction, setLastAction] = useState<ActionFeedbackPayload | null>(null);
 
-  const homePage = pathname === '/';
+  const homePage = mounted && pathname === '/';
 
   useEffect(() => {
+    setMounted(true);
     try { setOpen(localStorage.getItem('momsat.chrome.sidebar') !== 'collapsed'); } catch {}
   }, []);
 
   useEffect(() => {
-    try { localStorage.setItem('momsat.chrome.sidebar', open ? 'open' : 'collapsed'); } catch {}
-  }, [open]);
-
-  useEffect(() => {
-    if (homePage) return;
+    if (!mounted || pathname === '/') return;
 
     let alive = true;
     let timer: number | undefined;
@@ -62,7 +60,11 @@ export default function MomsatAppChrome({ children }: Props) {
       if (requestTimer !== undefined) window.clearTimeout(requestTimer);
       if (timer !== undefined) window.clearInterval(timer);
     };
-  }, [homePage]);
+  }, [mounted, pathname]);
+
+  useEffect(() => {
+    try { localStorage.setItem('momsat.chrome.sidebar', open ? 'open' : 'collapsed'); } catch {}
+  }, [open]);
 
   useEffect(() => subscribeActionFeedback((payload) => {
     setLastAction(payload);
@@ -79,7 +81,7 @@ export default function MomsatAppChrome({ children }: Props) {
     ['/admin', 'مدیریت MOMSAT', Tv],
   ] as const, []);
 
-  if (homePage) return <>{children}</>;
+  if (!mounted || homePage) return <>{children}</>;
 
   const channels = health?.catalog?.channels ?? 0;
   const sources = health?.catalog?.sources ?? 0;
