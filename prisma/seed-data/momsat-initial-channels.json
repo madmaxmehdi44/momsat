@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Initial MOMSAT channel seed data supplied by the project owner.",
+  "sourceFormat": "channel_id,category_id,channel_name,channel_name_en,channel_image,channel_url,channel_referer,channel_agent,channel_origin,need_vpn,for_iran,popular,isvip,category_name,category_name_en,channel_headers,sourses",
+  "channels": []
+}
