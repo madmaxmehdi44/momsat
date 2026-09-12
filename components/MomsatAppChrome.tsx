@@ -73,7 +73,7 @@ export default function MomsatAppChrome({ children }: Props) {
 
   const navItems = useMemo(() => [
     ['/', 'خانه', Home],
-    ['/', 'کشف شبکه‌ها', Compass],
+    ['/?discover=1', 'کشف شبکه‌ها', Compass],
     ['/guide', 'راهنمای پخش', Radio],
     ['/?favorites=1', 'علاقه‌مندی‌ها', Heart],
     ['/?recent=1', 'اخیراً تماشا شده', Clock3],
