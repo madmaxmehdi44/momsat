@@ -10,6 +10,7 @@ import styles from './PersistentPlayerProvider.module.css';
 
 type Source = { url: string; title?: string | null; referer?: string | null; origin?: string | null; country?: string | null; vip?: boolean };
 export type PersistentChannel = { id?: number; channelId?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
+type PlayerChannelProps = { id?: number; name?: string; image?: string | null; url?: string | null; referer?: string | null; origin?: string | null; sources?: Source[] };
 type PlayerHostRect = { top: number; left: number; width: number; height: number };
 type CatalogResponse = { channels?: PersistentChannel[] };
 type MiniPosition = { left: number; top: number };
@@ -103,124 +104,121 @@ export default function PersistentPlayerProvider({ children }: { children: React
     const nextId = persistentChannelId(channel);
     const currentId = persistentChannelId(activeChannelRef.current);
     if (nextId != null && nextId !== currentId) failoverHistoryRef.current.delete(nextId);
-    setActiveChannelState(channel);
+    setCollapsed(false);
+    setActiveChannelState((current) => current && channelKey(current) === channelKey(channel) ? current : channel);
   }, []);
 
-  const stopPlayer = useCallback(() => setActiveChannelState(null), []);
+  const play = useCallback((channel: PersistentChannel) => setActiveChannel(channel), [setActiveChannel]);
+  const stopPlayer = useCallback(() => {
+    setCollapsed(true);
+    setActiveChannelState(null);
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+  }, []);
 
   const loadCatalog = useCallback(async () => {
-    if (catalogPromiseRef.current) return catalogPromiseRef.current;
-    const promise = fetch('/api/catalog', { cache: 'no-store' })
-      .then((response) => response.ok ? response.json() as Promise<CatalogResponse> : ({ channels: [] }))
-      .then((body) => body.channels ?? [])
-      .catch(() => [])
-      .finally(() => { catalogPromiseRef.current = null; });
-    catalogPromiseRef.current = promise;
-    return promise;
+    if (!catalogPromiseRef.current) {
+      catalogPromiseRef.current = fetch('/api/catalog', { cache: 'no-store' }).then(async (response) => {
+        if (!response.ok) throw new Error(`catalog request failed: ${response.status}`);
+        const body = await response.json() as CatalogResponse;
+        return Array.isArray(body.channels) ? body.channels : [];
+      }).finally(() => { catalogPromiseRef.current = null; });
+    }
+    return catalogPromiseRef.current;
   }, []);
 
-  const play = useCallback((channel: PersistentChannel) => {
-    setActiveChannel(channel);
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(channel)); } catch {}
-  }, [setActiveChannel]);
-
   useEffect(() => {
-    try {
-      if (activeChannel) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(activeChannel));
-      else sessionStorage.removeItem(STORAGE_KEY);
-    } catch {}
-  }, [activeChannel]);
-
-  useEffect(() => {
-    const handlePlaybackFailure = (event: Event) => {
-      const detail = (event as CustomEvent<PlaybackFailureDetail>).detail;
-      const current = activeChannelRef.current;
-      const channelId = persistentChannelId(current);
-      if (!detail || !current || channelId == null || detail.channelId !== channelId || !detail.url) return;
-
-      const allSources = Array.from(new Map(
-        [
-          ...(current.url ? [{ url: current.url, referer: current.referer, origin: current.origin }] : []),
-          ...(current.sources ?? []),
-        ].map((source) => [source.url.trim(), source]).filter(([url]) => Boolean(url)),
-      ).values());
-      if (allSources.length <= 1) return;
-
-      const failedUrl = detail.url.trim();
-      const history = failoverHistoryRef.current.get(channelId) ?? new Set<string>();
-      history.add(failedUrl);
-      failoverHistoryRef.current.set(channelId, history);
-
-      const currentIndex = allSources.findIndex((source) => source.url.trim() === failedUrl);
-      const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
-      const next = [...allSources.slice(startIndex), ...allSources.slice(0, startIndex)]
-        .find((source) => !history.has(source.url.trim()));
-      if (!next) return;
-
-      const others = allSources.filter((source) => source.url.trim() !== next.url.trim());
-      setActiveChannel({ ...current, url: next.url, referer: next.referer ?? null, origin: next.origin ?? null, sources: [next, ...others] });
+    const onChannelLinkClick = (event: MouseEvent) => {
+      if (!activeChannel || collapsed) return;
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target instanceof Element ? event.target.closest('a[href]') as HTMLAnchorElement | null : null;
+      if (!target) return;
+      const href = target.getAttribute('href') || '';
+      const watchMatch = href.match(/^\/watch\?v=(\d+)(?:&.*)?$/);
+      if (!watchMatch) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const channelId = Number(watchMatch[1]);
+      if (!Number.isFinite(channelId)) return;
+      void loadCatalog().then((channels) => {
+        const channel = channels.find((item) => persistentChannelId(item) === channelId);
+        if (channel) setActiveChannel(channel);
+      }).catch(() => undefined);
     };
-
-    window.addEventListener('momsat:playback-failure', handlePlaybackFailure);
-    return () => window.removeEventListener('momsat:playback-failure', handlePlaybackFailure);
-  }, [setActiveChannel]);
-
-  const registerPlayerHost = useCallback((element: HTMLElement | null) => setPlayerHost(element), []);
+    document.addEventListener('click', onChannelLinkClick, true);
+    return () => document.removeEventListener('click', onChannelLinkClick, true);
+  }, [activeChannel, collapsed, loadCatalog, setActiveChannel]);
 
   useEffect(() => {
-    if (!playerHost) { setHostRect(null); return; }
+    if (!expanded || !playerHost) { setHostRect(null); return; }
+    let frame = 0;
     const update = () => {
-      const rect = playerHost.getBoundingClientRect();
-      setHostRect({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rect = playerHost.getBoundingClientRect();
+        setHostRect({ top: rect.top + window.scrollY, left: rect.left + window.scrollX, width: rect.width, height: rect.height });
+      });
     };
-    update();
     const observer = new ResizeObserver(update);
     observer.observe(playerHost);
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [playerHost]);
+    window.addEventListener('resize', update, { passive: true });
+    window.addEventListener('scroll', update, { passive: true });
+    update();
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener('resize', update); window.removeEventListener('scroll', update); };
+  }, [expanded, playerHost]);
 
+  useEffect(() => { if (miniPosition) try { localStorage.setItem(MINI_POSITION_KEY, JSON.stringify(miniPosition)); } catch {} }, [miniPosition]);
+  useEffect(() => { if (activeChannel && !collapsed) try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(activeChannel)); } catch {} }, [activeChannel, collapsed]);
+
+  const handleMiniPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (expanded || !miniPosition) return;
+    if (event.button !== 0 && event.pointerType !== 'touch') return;
+    const rect = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!rect) return;
+    dragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    setDragging(true);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, [expanded, miniPosition]);
+
+  const handleMiniPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || expanded) return;
+    setMiniPosition(clampMiniPosition({ left: event.clientX - drag.offsetX, top: event.clientY - drag.offsetY }));
+  }, [expanded]);
+
+  const endMiniDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setDragging(false);
+    try { event.currentTarget.releasePointerCapture?.(event.pointerId); } catch {}
+  }, []);
+
+  const registerPlayerHost = useCallback((element: HTMLElement | null) => setPlayerHost((current) => current === element ? current : element), []);
   const value = useMemo<PersistentPlayerContextValue>(() => ({ activeChannel, expanded, setActiveChannel, play, stopPlayer, registerPlayerHost }), [activeChannel, expanded, setActiveChannel, play, stopPlayer, registerPlayerHost]);
+  const portalTarget = typeof document !== 'undefined' ? document.body : null;
+  const canRenderPlayer = Boolean(activeChannel && !collapsed && portalTarget && (!expanded || hostRect));
 
-  const player = activeChannel && miniPosition ? <>
-    <StreamHealthObserver channel={activeChannel} />
-    <StreamAccelerator channel={activeChannel} />
-    <div
-      className={`${styles.floatingPlayer}${collapsed ? ` ${styles.collapsed}` : ''}`}
-      style={expanded && hostRect ? { left: hostRect.left, top: hostRect.top, width: hostRect.width, height: hostRect.height } : { left: miniPosition.left, top: miniPosition.top, width: MINI_WIDTH }}
-      onPointerDown={(event) => {
-        if (expanded || event.button !== 0) return;
-        const rect = event.currentTarget.getBoundingClientRect();
-        dragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
-        event.currentTarget.setPointerCapture(event.pointerId);
-        setDragging(true);
-      }}
-      onPointerMove={(event) => {
-        if (!dragRef.current || dragRef.current.pointerId !== event.pointerId || expanded) return;
-        setMiniPosition(clampMiniPosition({ left: event.clientX - dragRef.current.offsetX, top: event.clientY - dragRef.current.offsetY }));
-      }}
-      onPointerUp={(event) => {
-        if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
-        dragRef.current = null;
-        setDragging(false);
-        try {
-          const next = miniPosition ? clampMiniPosition(miniPosition) : null;
-          if (next) localStorage.setItem(MINI_POSITION_KEY, JSON.stringify(next));
-        } catch {}
-      }}
-    >
-      {!expanded && <button type="button" className={styles.collapseButton} onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? 'باز کردن پخش‌کننده' : 'کوچک کردن پخش‌کننده'}>{collapsed ? '+' : '−'}</button>}
-      <PlayerProEnhanced channel={activeChannel} />
-    </div>
-  </> : null;
+  const player = canRenderPlayer && activeChannel && portalTarget ? createPortal(
+    <aside className={`${styles.root} ${expanded ? styles.expanded : styles.mini}`} style={expanded && hostRect ? { top: hostRect.top, left: hostRect.left, width: hostRect.width, height: hostRect.height } : miniPosition ? { left: miniPosition.left, top: miniPosition.top } : undefined} aria-label="MOMSAT player">
+      <div className={styles.inner}>
+        {!expanded && <div className={`${styles.dragHandle} ${dragging ? styles.dragging : ''}`} onPointerDown={handleMiniPointerDown} onPointerMove={handleMiniPointerMove} onPointerUp={endMiniDrag} onPointerCancel={endMiniDrag} role="presentation" />}
+        <StreamAccelerator urls={activeChannel.sources?.map((source) => source.url) ?? []} />
+        <StreamHealthObserver channel={activeChannel} />
+        <PlayerProEnhanced channel={{
+          id: persistentChannelId(activeChannel) ?? undefined,
+          name: activeChannel.name,
+          image: activeChannel.image,
+          url: activeChannel.url,
+          referer: activeChannel.referer,
+          origin: activeChannel.origin,
+          sources: activeChannel.sources,
+        } satisfies PlayerChannelProps} />
+        <button className={styles.close} type="button" onClick={stopPlayer} aria-label="بستن پلیر شناور">×</button>
+        {!expanded && <div className={styles.nowPlaying} dir="rtl"><strong>{activeChannel.name || 'MOMSAT'}</strong><span>در حال پخش</span></div>}
+      </div>
+    </aside>,
+    portalTarget,
+  ) : null;
 
-  return <PersistentPlayerContext.Provider value={value}>
-    {children}
-    {player && createPortal(player, document.body)}
-  </PersistentPlayerContext.Provider>;
+  return <PersistentPlayerContext.Provider value={value}>{children}{player}</PersistentPlayerContext.Provider>;
 }
