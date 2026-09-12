@@ -92,7 +92,8 @@ export default function StreamHealthObserver({ channel }: Props) {
     const onPlaying = () => {
       const video = syncCurrentSource(); if (!video || !currentUrl) return;
       clearFailureTimer(); clearFreezeTimer(); lastCurrentTime = video.currentTime; lastProgressAt = performance.now(); recoveryAttempted = false;
-      if (successReported) return;
+      if (successReported && !failureReported) return;
+      failureReported = false;
       successReported = true;
       report(channel.id!, currentUrl, 'success', Math.max(0, Math.round(performance.now() - startedAt)));
     };
@@ -101,7 +102,7 @@ export default function StreamHealthObserver({ channel }: Props) {
       freezeTimer = window.setTimeout(() => {
         freezeTimer = null;
         const video = syncCurrentSource();
-        if (!video || video.paused || video.ended || successReported || failureReported || !currentUrl) return;
+        if (!video || video.paused || video.ended || failureReported || !currentUrl) return;
         const now = performance.now();
         const frozen = now - lastProgressAt >= FREEZE_RECOVERY_MS && video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
         if (!frozen) return;
@@ -109,6 +110,7 @@ export default function StreamHealthObserver({ channel }: Props) {
         const elapsed = now - lastProgressAt;
         if (elapsed >= FREEZE_FAILURE_MS) {
           failureReported = true;
+          successReported = false;
           report(channel.id!, currentUrl, 'failure', Math.max(0, Math.round(now - startedAt)), 'Live playback frozen after recovery attempt');
           return;
         }
@@ -116,24 +118,25 @@ export default function StreamHealthObserver({ channel }: Props) {
       }, FREEZE_RECOVERY_MS);
     };
     const onWaiting = () => {
-      const video = syncCurrentSource(); if (!video || video.paused || successReported || failureReported) return;
+      const video = syncCurrentSource(); if (!video || video.paused || video.ended || failureReported) return;
       scheduleFreezeCheck();
     };
     const onError = () => {
-      const video = syncCurrentSource(); if (!video || !currentUrl || failureReported || successReported) return;
+      const video = syncCurrentSource(); if (!video || !currentUrl || failureReported) return;
       clearFailureTimer();
       failureTimer = window.setTimeout(() => {
         failureTimer = null;
-        const latest = syncCurrentSource(); if (!latest || successReported || failureReported || !currentUrl) return;
+        const latest = syncCurrentSource(); if (!latest || failureReported || !currentUrl) return;
         const stillBroken = latest.error != null && latest.paused && latest.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
         if (!stillBroken) return;
         softRecover(latest);
         failureTimer = window.setTimeout(() => {
           failureTimer = null;
-          const recovered = syncCurrentSource(); if (!recovered || successReported || failureReported || !currentUrl) return;
+          const recovered = syncCurrentSource(); if (!recovered || failureReported || !currentUrl) return;
           const stillBrokenAfterRecovery = recovered.error != null && recovered.paused && recovered.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
           if (!stillBrokenAfterRecovery) return;
           failureReported = true;
+          successReported = false;
           const mediaError = recovered.error;
           report(channel.id!, currentUrl, 'failure', Math.max(0, Math.round(performance.now() - startedAt)), mediaError ? `MediaError ${mediaError.code} after recovery` : 'HTMLMediaElement error after recovery grace');
         }, FREEZE_RECOVERY_MS);
@@ -156,7 +159,7 @@ export default function StreamHealthObserver({ channel }: Props) {
     timer = window.setInterval(() => {
       attach(); const video = attachedVideo; if (!video) return;
       if (video.currentSrc) syncCurrentSource();
-      if (video.paused || video.ended || successReported || failureReported || !currentUrl) return;
+      if (video.paused || video.ended || failureReported || !currentUrl) return;
       if (video.currentTime !== lastCurrentTime) { lastCurrentTime = video.currentTime; lastProgressAt = performance.now(); recoveryAttempted = false; clearFreezeTimer(); return; }
       if (performance.now() - lastProgressAt >= FREEZE_RECOVERY_MS) scheduleFreezeCheck();
     }, PROGRESS_POLL_MS);
