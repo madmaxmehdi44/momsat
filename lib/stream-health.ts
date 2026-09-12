@@ -1,6 +1,7 @@
 import type { StreamHealthStatus as PrismaStreamHealthStatus } from '@prisma/client';
 import type { Channel } from './source';
 import { withDbReadTimeout, withDbTimeout } from './db-timeout';
+import { prisma } from './prisma';
 
 export type StreamHealthStatus = PrismaStreamHealthStatus;
 
@@ -25,8 +26,11 @@ const BROKEN_STREAK = 3;
 const MAX_ERROR_LENGTH = 500;
 const CHANNEL_EXISTS_TTL_MS = 5 * 60_000;
 const CHANNEL_MISSING_TTL_MS = 30_000;
+const SOURCE_EXISTS_TTL_MS = 2 * 60_000;
+const SOURCE_MISSING_TTL_MS = 15_000;
 const HEALTH_RECENCY_WINDOW_MS = 6 * 60 * 60_000;
 const channelExistenceCache = new Map<number, { exists: boolean; expiresAt: number }>();
+const sourceRegistrationCache = new Map<string, { exists: boolean; expiresAt: number }>();
 
 function normalizeUrl(url: string) { return url.trim(); }
 function safeError(error: unknown) {
@@ -105,6 +109,32 @@ async function persistedChannelExists(channelId: number) {
   }
 }
 
+async function persistedSourceExists(channelId: number, url: string) {
+  const normalizedUrl = normalizeUrl(url);
+  if (!process.env.DATABASE_URL?.trim() || !Number.isInteger(channelId) || channelId <= 0 || !normalizedUrl) return false;
+  const cacheKey = `${channelId}|${normalizedUrl}`;
+  const cached = sourceRegistrationCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.exists;
+  try {
+    const row = await withDbReadTimeout((tx) => tx.channel.findFirst({
+      where: {
+        id: channelId,
+        OR: [
+          { url: normalizedUrl },
+          { sources: { some: { url: normalizedUrl } } },
+        ],
+      },
+      select: { id: true },
+    }));
+    const exists = Boolean(row);
+    sourceRegistrationCache.set(cacheKey, { exists, expiresAt: Date.now() + (exists ? SOURCE_EXISTS_TTL_MS : SOURCE_MISSING_TTL_MS) });
+    return exists;
+  } catch (error) {
+    console.warn('[stream-health] Failed to verify registered stream source.', error);
+    return false;
+  }
+}
+
 async function quarantineChannelIfAllSourcesBroken(channelId: number) {
   if (!process.env.DATABASE_URL?.trim()) return;
   await withDbTimeout(async (tx) => {
@@ -122,8 +152,8 @@ async function quarantineChannelIfAllSourcesBroken(channelId: number) {
 
 export async function reportStreamSuccess(input: { channelId: number; url: string; latencyMs?: number | null }) {
   if (!process.env.DATABASE_URL?.trim() || !input.channelId || !normalizeUrl(input.url)) return;
-  if (!(await persistedChannelExists(input.channelId))) return;
   const url = normalizeUrl(input.url);
+  if (!(await persistedSourceExists(input.channelId, url))) return;
   const checkedAt = now();
   try {
     await withDbTimeout(async (tx) => {
@@ -145,8 +175,8 @@ export async function reportStreamSuccess(input: { channelId: number; url: strin
 
 export async function reportStreamFailure(input: { channelId: number; url: string; error?: unknown; latencyMs?: number | null }) {
   if (!process.env.DATABASE_URL?.trim() || !input.channelId || !normalizeUrl(input.url)) return;
-  if (!(await persistedChannelExists(input.channelId))) return;
   const url = normalizeUrl(input.url);
+  if (!(await persistedSourceExists(input.channelId, url))) return;
   const checkedAt = now();
   try {
     let shouldQuarantine = false;
