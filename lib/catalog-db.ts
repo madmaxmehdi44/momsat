@@ -146,6 +146,18 @@ export async function getCatalog() {
   return ttlGetOrSet(CATALOG_CACHE_KEY, catalogTtlMs(), loadCatalog);
 }
 
+/**
+ * Fast DB-only catalog used by interactive discovery.
+ * Never falls back to public-source scraping/discovery.
+ */
+export async function getDatabaseCatalog() {
+  const warmCatalog = ttlGet<Channel[]>(CATALOG_CACHE_KEY);
+  if (warmCatalog && warmCatalog.length > 0) return warmCatalog;
+
+  const databaseCatalog = await fetchCatalogFromDb();
+  return databaseCatalog ?? [];
+}
+
 export function invalidateCatalogCache() {
   ttlDelete(CATALOG_CACHE_KEY);
   ttlDelete(SOURCE_FALLBACK_CACHE_KEY);
