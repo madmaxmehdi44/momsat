@@ -18,8 +18,9 @@ async function sourceId(preferred: number | null, channelId: number, url: string
 export async function POST(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   try {
-    const body = await req.json() as { channels?: Channel[] };
+    const body = await req.json() as { channels?: Channel[]; fullSync?: boolean };
     const channels = Array.isArray(body.channels) ? body.channels : [];
+    const fullSync = body.fullSync === true;
     let created = 0; let updated = 0; let sourcesCreated = 0; let sourcesUpdated = 0; let channelsDeleted = 0;
     const ids = new Set(channels.map((c) => Number(c.id)).filter((id) => Number.isInteger(id) && id > 0));
 
@@ -47,11 +48,13 @@ export async function POST(req: NextRequest) {
       await prisma.source.deleteMany({ where: { channelId: channel.id, ...(keepIds.length ? { id: { notIn: keepIds } } : {}) } });
     }
 
-    const existingIds = await prisma.channel.findMany({ select: { id: true } });
-    const removed = existingIds.map((x) => x.id).filter((id) => !ids.has(id));
-    if (removed.length) { await prisma.channel.deleteMany({ where: { id: { in: removed } } }); channelsDeleted = removed.length; }
+    if (fullSync) {
+      const existingIds = await prisma.channel.findMany({ select: { id: true } });
+      const removed = existingIds.map((x) => x.id).filter((id) => !ids.has(id));
+      if (removed.length) { await prisma.channel.deleteMany({ where: { id: { in: removed } } }); channelsDeleted = removed.length; }
+    }
     invalidateCatalogCache();
-    return NextResponse.json({ ok: true, created, updated, sourcesCreated, sourcesUpdated, channelsDeleted });
+    return NextResponse.json({ ok: true, created, updated, sourcesCreated, sourcesUpdated, channelsDeleted, fullSync });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Edited CSV sync failed' }, { status: 400 });
   }
