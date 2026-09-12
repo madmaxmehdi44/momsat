@@ -26,6 +26,7 @@ const MAX_ERROR_LENGTH = 500;
 const channelExistenceCache = new Map<number, { exists: boolean; expiresAt: number }>();
 const CHANNEL_EXISTS_TTL_MS = 5 * 60_000;
 const CHANNEL_MISSING_TTL_MS = 30_000;
+const HEALTH_RECENCY_WINDOW_MS = 6 * 60 * 60_000;
 
 function normalizeUrl(url: string) {
   return url.trim();
@@ -40,32 +41,39 @@ function now() {
   return new Date();
 }
 
-async function persistedChannelExists(channelId: number) {
-  if (!process.env.DATABASE_URL?.trim() || !Number.isInteger(channelId) || channelId <= 0) return false;
-  const cached = channelExistenceCache.get(channelId);
-  if (cached && cached.expiresAt > Date.now()) return cached.exists;
-
-  try {
-    const row = await prisma.channel.findUnique({ where: { id: channelId }, select: { id: true } });
-    const exists = Boolean(row);
-    channelExistenceCache.set(channelId, { exists, expiresAt: Date.now() + (exists ? CHANNEL_EXISTS_TTL_MS : CHANNEL_MISSING_TTL_MS) });
-    return exists;
-  } catch (error) {
-    console.warn('[stream-health] Failed to verify channel before health write.', error);
-    return false;
-  }
+function recencyPenalty(lastFailureAt: Date | null) {
+  if (!lastFailureAt) return 0;
+  const age = Math.max(0, Date.now() - lastFailureAt.getTime());
+  if (age >= HEALTH_RECENCY_WINDOW_MS) return 0;
+  return 18 * (1 - age / HEALTH_RECENCY_WINDOW_MS);
 }
 
+/**
+ * Runtime source score used to choose the most trustworthy stream path.
+ * The score intentionally combines reliability, recent failures and latency;
+ * a single slow sample must not outweigh a strong playback history.
+ */
 export function streamHealthScore(record: HealthRecord | undefined) {
   if (!record) return 45;
   if (record.status === 'ARCHIVED') return -1000;
   if (record.status === 'BROKEN') return -900;
-  if (record.status === 'SUSPECT') return 5 - Math.min(20, record.failureStreak * 4);
 
+  const total = Math.max(0, record.successCount + record.failureCount);
+  const successRate = total > 0 ? record.successCount / total : 0.5;
+  const reliabilityScore = successRate * 42;
+  const experienceScore = Math.min(18, Math.log10(record.successCount + 1) * 9);
   const latency = record.averageLatencyMs ?? record.lastLatencyMs;
-  const latencyScore = latency == null ? 8 : Math.max(0, 20 - Math.min(20, latency / 100));
-  const successScore = Math.min(18, Math.log10(record.successCount + 1) * 9);
-  return 55 + latencyScore + successScore + Math.min(8, record.failureCount === 0 ? 8 : 2);
+  const latencyScore = latency == null
+    ? 8
+    : Math.max(0, 20 - Math.min(20, latency / 100));
+  const recentFailurePenalty = recencyPenalty(record.lastFailureAt);
+  const streakPenalty = Math.min(22, record.failureStreak * 6);
+
+  if (record.status === 'SUSPECT') {
+    return Math.max(0, 18 + reliabilityScore * 0.55 + latencyScore * 0.5 - recentFailurePenalty - streakPenalty);
+  }
+
+  return 38 + reliabilityScore + experienceScore + latencyScore - recentFailurePenalty - streakPenalty;
 }
 
 export async function getStreamHealthForChannels(channelIds: number[]) {
@@ -93,7 +101,12 @@ export async function applyStreamHealth(channels: Channel[]) {
         .sort((a, b) => {
           const left = health.get(`${channel.id}|${normalizeUrl(a.url)}`);
           const right = health.get(`${channel.id}|${normalizeUrl(b.url)}`);
-          return streamHealthScore(right) - streamHealthScore(left);
+          const scoreDelta = streamHealthScore(right) - streamHealthScore(left);
+          if (scoreDelta !== 0) return scoreDelta;
+
+          // Stable deterministic fallback when health evidence is equivalent.
+          if (Boolean(a.vip) !== Boolean(b.vip)) return a.vip ? 1 : -1;
+          return a.url.localeCompare(b.url);
         });
 
       const primary = sources[0] ?? null;
@@ -106,6 +119,22 @@ export async function applyStreamHealth(channels: Channel[]) {
       };
     })
     .filter((channel) => channel.sources.length > 0 && channel.url);
+}
+
+async function persistedChannelExists(channelId: number) {
+  if (!process.env.DATABASE_URL?.trim() || !Number.isInteger(channelId) || channelId <= 0) return false;
+  const cached = channelExistenceCache.get(channelId);
+  if (cached && cached.expiresAt > Date.now()) return cached.exists;
+
+  try {
+    const row = await prisma.channel.findUnique({ where: { id: channelId }, select: { id: true } });
+    const exists = Boolean(row);
+    channelExistenceCache.set(channelId, { exists, expiresAt: Date.now() + (exists ? CHANNEL_EXISTS_TTL_MS : CHANNEL_MISSING_TTL_MS) });
+    return exists;
+  } catch (error) {
+    console.warn('[stream-health] Failed to verify channel before health write.', error);
+    return false;
+  }
 }
 
 async function quarantineChannelIfAllSourcesBroken(channelId: number) {
@@ -218,7 +247,7 @@ export async function reportStreamFailure(input: {
     const message = safeError(input.error);
 
     await prisma.streamHealth.upsert({
-      where: { channelId_url: { channelId: input.channelId, url } },
+      where: { channelId_url: { channelId, url } },
       create: {
         channelId: input.channelId,
         url,
