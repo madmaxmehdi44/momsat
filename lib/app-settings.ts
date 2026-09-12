@@ -87,13 +87,11 @@ export function loadAppSettings(): AppSettings {
   if (typeof window === 'undefined') return DEFAULT_APP_SETTINGS;
   const current = readStoredSettings(APP_SETTINGS_KEY);
   if (current) return current;
-
   const legacy = readStoredSettings(LEGACY_APP_SETTINGS_KEY);
   if (legacy) {
     try { localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(legacy)); } catch {}
     return legacy;
   }
-
   return DEFAULT_APP_SETTINGS;
 }
 
@@ -109,16 +107,11 @@ export function saveAppSettings(settings: AppSettings) {
 
 export function subscribeAppSettings(listener: (settings: AppSettings) => void): () => void {
   if (typeof window === 'undefined') return () => undefined;
-
-  const onCustom = (event: Event) => {
-    const custom = event as CustomEvent<AppSettings>;
-    listener(sanitizeSettings(custom.detail));
-  };
+  const onCustom = (event: Event) => listener(sanitizeSettings((event as CustomEvent<AppSettings>).detail));
   const onStorage = (event: StorageEvent) => {
     if (event.key !== APP_SETTINGS_KEY) return;
     listener(loadAppSettings());
   };
-
   window.addEventListener(SETTINGS_EVENT, onCustom);
   window.addEventListener('storage', onStorage);
   return () => {
@@ -132,11 +125,18 @@ export function applyAppTheme(theme: AppTheme) {
   const root = document.documentElement;
   root.dataset.momsatTheme = theme;
   const values = {
-    midnight: { bg: '#090b10', panel: '#10141c', line: '#232b38', text: '#f4f7fb', muted: '#95a0b1', accent: '#37d0ff', accent2: '#6b7cff' },
-    light: { bg: '#eef3f8', panel: '#ffffff', line: '#d5dee9', text: '#17202c', muted: '#657184', accent: '#078dba', accent2: '#5368e8' },
-    aurora: { bg: '#080b15', panel: '#11152a', line: '#29314e', text: '#f4f5ff', muted: '#9ca8c5', accent: '#40d7ff', accent2: '#8b6cff' },
+    midnight: { bg: '#0f0f0f', panel: '#171717', line: '#292929', text: '#f1f1f1', muted: '#8f8f8f', accent: '#ff1744', accent2: '#ff315b', chromeBg: '#0f0f0f', chromePanel: '#171717' },
+    light: { bg: '#eef2f6', panel: '#ffffff', line: '#d5dce5', text: '#17202c', muted: '#647184', accent: '#087ea4', accent2: '#3859d6', chromeBg: '#f5f7fa', chromePanel: '#ffffff' },
+    aurora: { bg: '#0a0d18', panel: '#14192b', line: '#293453', text: '#f4f5ff', muted: '#9da9c5', accent: '#42d7ff', accent2: '#8d6dff', chromeBg: '#090c16', chromePanel: '#12172a' },
   }[theme];
   for (const [key, value] of Object.entries(values)) root.style.setProperty(`--${key}`, value);
+  root.style.setProperty('--momsat-bg', values.chromeBg);
+  root.style.setProperty('--momsat-panel', values.chromePanel);
+  root.style.setProperty('--momsat-panel-2', values.chromePanel);
+  root.style.setProperty('--momsat-line', values.line);
+  root.style.setProperty('--momsat-text', values.text);
+  root.style.setProperty('--momsat-muted', values.muted);
+  root.style.setProperty('--momsat-red', values.accent);
   document.body.style.background = theme === 'light'
     ? 'radial-gradient(circle at 80% -10%,#dce9f7 0,transparent 35%),var(--bg)'
     : 'radial-gradient(circle at 80% -10%,#172130 0,transparent 35%),var(--bg)';
