@@ -24,7 +24,7 @@ export default async function Guide() {
         <h1>راهنمای برنامه‌ها</h1>
         <p>برنامه‌های ۲۴ ساعت آینده بر اساس زمان محلی دستگاه نمایش داده می‌شوند.</p>
       </div>
-      <Link className="momsat-primary-link" href="/browse">بازگشت به شبکه‌ها</Link>
+      <Link className="momsat-primary-link" href="/">بازگشت به صفحه اصلی</Link>
     </section>
 
     {groups.length === 0 ? (
