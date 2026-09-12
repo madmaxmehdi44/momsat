@@ -59,9 +59,16 @@ async function verifySources(sources: Source[]) {
   const candidates = sources.slice(0, 12);
   const results = await Promise.all(candidates.map(async (source, index) => {
     const probe = await probeSource(source);
-    return probe ? { source, index, latencyMs: probe.latencyMs ?? Number.MAX_SAFE_INTEGER } : null;
+    return probe ? { source, index } : null;
   }));
-  return results.filter((item): item is { source: Source; index: number; latencyMs: number } => Boolean(item)).sort((a, b) => Number(isDirectMedia(b.source.url)) - Number(isDirectMedia(a.source.url)) || a.latencyMs - b.latencyMs || a.index - b.index).map((item) => item.source);
+
+  // Preserve the order supplied by the catalog. The catalog is already ranked by
+  // persisted stream-health history; latency/protocol heuristics must not undo that
+  // server-side intelligence. Playability is a gate, not a new ranking algorithm.
+  return results
+    .filter((item): item is { source: Source; index: number } => Boolean(item))
+    .sort((a, b) => a.index - b.index)
+    .map((item) => item.source);
 }
 
 export default function SmartPlayer({ channel }: { channel: Channel }) {
