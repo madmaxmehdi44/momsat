@@ -8,11 +8,10 @@ import { subscribeActionFeedback, type ActionFeedbackPayload } from '../lib/acti
 import styles from './MomsatAppChrome.module.css';
 
 type Health = { ok?: boolean; database?: string; catalog?: { channels?: number; sources?: number }; adapters?: Array<{ enabled?: boolean; configured?: boolean }> };
-
 type Props = { children: React.ReactNode };
 
 function activePath(pathname: string | null, path: string) {
-  if (path === '/browse') return pathname === '/browse' || pathname === '/';
+  if (path === '/') return pathname === '/';
   return Boolean(pathname?.startsWith(path));
 }
 
@@ -23,7 +22,7 @@ export default function MomsatAppChrome({ children }: Props) {
   const [running, setRunning] = useState(0);
   const [lastAction, setLastAction] = useState<ActionFeedbackPayload | null>(null);
 
-  const browsePage = pathname === '/browse' || pathname === '/';
+  const homePage = pathname === '/';
 
   useEffect(() => {
     try { setOpen(localStorage.getItem('momsat.chrome.sidebar') !== 'collapsed'); } catch {}
@@ -34,7 +33,7 @@ export default function MomsatAppChrome({ children }: Props) {
   }, [open]);
 
   useEffect(() => {
-    if (browsePage) return;
+    if (homePage) return;
 
     let alive = true;
     let timer: number | undefined;
@@ -63,7 +62,7 @@ export default function MomsatAppChrome({ children }: Props) {
       if (requestTimer !== undefined) window.clearTimeout(requestTimer);
       if (timer !== undefined) window.clearInterval(timer);
     };
-  }, [browsePage]);
+  }, [homePage]);
 
   useEffect(() => subscribeActionFeedback((payload) => {
     setLastAction(payload);
@@ -71,16 +70,16 @@ export default function MomsatAppChrome({ children }: Props) {
   }), []);
 
   const navItems = useMemo(() => [
-    ['/browse', 'خانه', Home],
-    ['/browse?category=all', 'کشف شبکه‌ها', Compass],
+    ['/', 'خانه', Home],
+    ['/', 'کشف شبکه‌ها', Compass],
     ['/guide', 'راهنمای پخش', Radio],
-    ['/browse?favorites=1', 'علاقه‌مندی‌ها', Heart],
-    ['/browse?recent=1', 'اخیراً تماشا شده', Clock3],
+    ['/?favorites=1', 'علاقه‌مندی‌ها', Heart],
+    ['/?recent=1', 'اخیراً تماشا شده', Clock3],
     ['/settings', 'تنظیمات', Settings],
     ['/admin', 'مدیریت MOMSAT', Tv],
   ] as const, []);
 
-  if (browsePage) return <>{children}</>;
+  if (homePage) return <>{children}</>;
 
   const channels = health?.catalog?.channels ?? 0;
   const sources = health?.catalog?.sources ?? 0;
@@ -91,9 +90,9 @@ export default function MomsatAppChrome({ children }: Props) {
     <header className={styles.header}>
       <div className={styles.headerSide}>
         <button className={styles.iconButton} onClick={() => setOpen((value) => !value)} aria-label="نمایش یا مخفی کردن منوی اصلی"><Menu size={21} /></button>
-        <Link href="/browse" className={styles.logo}>MOM<span>SAT</span></Link>
+        <Link href="/" className={styles.logo}>MOM<span>SAT</span></Link>
       </div>
-      <Link href="/browse" className={styles.searchBar} aria-label="جستجوی شبکه">
+      <Link href="/" className={styles.searchBar} aria-label="جستجوی شبکه">
         <Search size={18} />
         <span>جستجوی شبکه، ورزش، اخبار، موسیقی...</span>
         <kbd>⌘ K</kbd>
@@ -112,7 +111,7 @@ export default function MomsatAppChrome({ children }: Props) {
     <div className={styles.body}>
       <aside className={styles.sidebar}>
         <nav className={styles.nav}>
-          {navItems.map(([href, label, Icon], index) => <div key={`${href}-${index}`} className={styles.navWrap}>
+          {navItems.map(([href, label, Icon], index) => <div key={`${href}-${index}-${label}`} className={styles.navWrap}>
             <Link className={`${styles.navItem}${activePath(pathname, href.split('?')[0]) ? ` ${styles.active}` : ''}`} href={href}><Icon size={19} /><span>{label}</span></Link>
             {index === 2 || index === 4 ? <div className={styles.divider} /> : null}
           </div>)}
@@ -124,14 +123,10 @@ export default function MomsatAppChrome({ children }: Props) {
           <div className={styles.systemRow}><span>Adapters</span><strong>{adapters.toLocaleString('fa-IR')}</strong></div>
         </div>
       </aside>
-
-      <main className={styles.content}>
-        <div className={styles.contentInner}>{children}</div>
-      </main>
+      <main className={styles.content}><div className={styles.contentInner}>{children}</div></main>
     </div>
-
     <nav className={styles.mobileNav} aria-label="ناوبری اصلی">
-      {navItems.slice(0, 5).map(([href, label, Icon]) => <Link key={href} className={`${styles.mobileItem}${activePath(pathname, href.split('?')[0]) ? ` ${styles.mobileActive}` : ''}`} href={href}><Icon size={18} /><span>{label}</span></Link>)}
+      {navItems.slice(0, 5).map(([href, label, Icon], index) => <Link key={`${href}-${index}`} className={`${styles.mobileItem}${activePath(pathname, href.split('?')[0]) ? ` ${styles.mobileActive}` : ''}`} href={href}><Icon size={18} /><span>{label}</span></Link>)}
     </nav>
   </div>;
 }
